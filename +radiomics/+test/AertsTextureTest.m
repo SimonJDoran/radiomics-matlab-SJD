@@ -27,7 +27,15 @@ classdef AertsTextureTest < matlab.unittest.TestCase
 			this.mask3D(9:16,13:20,3:6) = 1;
 			result = AertsTexture.compute(image3D, this.mask3D, ...
 				containers.Map('KeyType', 'char', 'ValueType', 'any'));
-			this.verifyTrue(result.isKey(AertsTexture.Autocorrelation));
+			metrics = Aerts.getMetrics();
+			for i=1:metrics.size()
+				metric = metrics.get(i);
+				if isempty(strfind(metric, 'Aerts.Texture'))
+					continue;
+				end
+				this.verifyTrue(result.isKey(metric) && isfinite(result(metric)), ...
+					sprintf('Metric "%s" missing or non-finite', metric));
+			end
 		end
 
 		function testDiscretise(this)

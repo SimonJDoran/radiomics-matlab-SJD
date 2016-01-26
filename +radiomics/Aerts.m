@@ -61,6 +61,17 @@ classdef Aerts < handle
 			metrics.add(AertsTexture.SumAverage);
 			metrics.add(AertsTexture.SumEntropy);
 			metrics.add(AertsTexture.SumVariance);
+			metrics.add(AertsTexture.ShortRunEmphasis);
+			metrics.add(AertsTexture.LongRunEmphasis);
+			metrics.add(AertsTexture.GreyLevelNonUniformity);
+			metrics.add(AertsTexture.RunLengthNonUniformity);
+			metrics.add(AertsTexture.RunPercentage);
+			metrics.add(AertsTexture.LowGreyLevelRunEmphasis);
+			metrics.add(AertsTexture.HighGreyLevelRunEmphasis);
+			metrics.add(AertsTexture.ShortRunLowGreyLevelEmphasis);
+			metrics.add(AertsTexture.ShortRunHighGreyLevelEmphasis);
+			metrics.add(AertsTexture.LongRunLowGreyLevelEmphasis);
+			metrics.add(AertsTexture.LongRunHighGreyLevelEmphasis);
 		end
 	end
 

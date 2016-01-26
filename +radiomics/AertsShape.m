@@ -18,7 +18,7 @@ classdef AertsShape < handle
 	%----------------------------------------------------------------------------
 	methods(Static)
 		%-------------------------------------------------------------------------
-		function collector = compute(image3D, mask3D, pixelDims, collector)
+		function collector = compute(mask3D, pixelDims, collector)
 			import radiomics.*;
 			[faces, vertices] = isosurface(mask3D, 0.5);
 			% Convert to mm instead of pixels
@@ -27,7 +27,7 @@ classdef AertsShape < handle
 				vertices(:,i) = vertices(:,i)*pixelDims(i);
 			end
 			dt = delaunayTriangulation(vertices);
-			[hullVertices,v] = convexHull(dt);
+			hullVertices = convexHull(dt);
 			area = AertsShape.area(dt, hullVertices);
 			volume = sum(mask3D(:))*prod(pixelDims);
 			collector(AertsShape.Compactness1) = volume/(sqrt(pi)*area.^(2/3));
@@ -41,7 +41,6 @@ classdef AertsShape < handle
 			collector(AertsShape.SurfaceArea) = area;
 			collector(AertsShape.SurfaceToVolumeRatio) = area/volume;
 			collector(AertsShape.Volume) = volume;
-			fprintf('Voxels: %f\nIsosurface: %f\nRatio: %f\n', volume, v, volume/v);
 		end
 
 	end % methods(Static)
