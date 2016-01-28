@@ -7,12 +7,15 @@ classdef Main < handle
 		logger = ether.log4m.Logger.getLogger('radiomics.Main');
 	end
 
+	%----------------------------------------------------------------------------
 	properties(SetAccess=private)
 		dataSource = [];
 	end
 
+	%----------------------------------------------------------------------------
 	properties(Access=private)
 		aimStudyUid = '1.2.840.113564.9.1.2728161578.69.2.5000228280';
+%		aimStudyUid = '1.2.840.113564.9.1.2728161578.69.2.5000194425';
 		rtStudyUid = '1.3.12.2.1107.5.8.15.100805.30000015110915184033200000001';
 		rtSeriesUid = '1.3.12.2.1107.5.8.15.100805.30000015110915184033200000023';
 		abdoStudyUid = '1.2.840.113704.1.111.4392.1423732023.6'
@@ -25,6 +28,7 @@ classdef Main < handle
 		instSeriesMap = [];
 	end
 
+	%----------------------------------------------------------------------------
 	methods
 		%-------------------------------------------------------------------------
 		function this = Main()
@@ -49,6 +53,7 @@ classdef Main < handle
 
 	end
 
+	%----------------------------------------------------------------------------
 	methods(Access=private)
 		%-------------------------------------------------------------------------
 		function buildRefSeriesMap(this, rtStructList)
@@ -105,12 +110,30 @@ classdef Main < handle
 		function outputResults(this, results)
 			import radiomics.*;
 			metrics = Aerts.getMetrics();
-			for i=1:metrics.size()
-				name = metrics.get(i);
-				if ~results.isKey(name)
-					continue;
+			prefix = {'', 'LLL.', 'LLH.', 'LHL.', 'LHH.', 'HLL.', 'HLH.', 'HHL.', 'HHH.'};
+			for j=1:numel(prefix)
+				for i=1:metrics.size()
+					name = [prefix{j},metrics.get(i)];
+					if ~results.isKey(name)
+						continue;
+					end
+					fprintf('%s: %f\n', name, results(name));
 				end
-				fprintf('%s: %f\n', name, results(name));
+			end
+		end
+
+		%-------------------------------------------------------------------------
+		function decompResults = processDecomp(this, decomp, mask, prefix)
+			results = containers.Map('KeyType', 'char', 'ValueType', 'any');
+			% First-order stats
+			radiomics.AertsStatistics.compute(decomp, mask, results);
+			% Texture
+			radiomics.AertsTexture.compute(decomp, mask, results);
+			% Pack them with the prefix
+			decompResults = containers.Map('KeyType', 'char', 'ValueType', 'any');
+			keys = results.keys();
+			for i=1:numel(keys)
+				decompResults([prefix,'.',keys{i}]) = results(keys{i});
 			end
 		end
 
@@ -122,10 +145,10 @@ classdef Main < handle
 % 			colormap(gray);
 			roiList = rtStruct.getRoiList();
 			nRoi = roiList.size();
-			for i=1:nRoi
-				roi = roiList.get(i);
+			for m=1:nRoi
+				roi = roiList.get(m);
 				this.logger.info(@() sprintf('Processing RtRoi: %s (%d of %d)', ...
-					roi.name, i, nRoi));
+					roi.name, m, nRoi));
 				roiImageRefs = roi.getImageReferenceList();
 				this.loadImageReferences(roiImageRefs);
 				seriesUid = this.instSeriesMap(roiImageRefs.get(1).sopInstanceUid);
@@ -134,8 +157,8 @@ classdef Main < handle
 				[nY,nX,nZ] = size(iv.data);
 				ivMask = zeros(nY, nX, nZ);
 				contourList = roi.getContourList();
-				for j=1:contourList.size()
-					contour = contourList.get(j);
+				for n=1:contourList.size()
+					contour = contourList.get(n);
 					% Assume only ever be one image referenced in a contour.
 					contourRef = contour.getImageReferenceList().toArray();
 					% Assume single frame images
@@ -149,10 +172,26 @@ classdef Main < handle
 				% First-order stats
 				radiomics.AertsStatistics.compute(iv.data, ivMask, results);
 				% Shape/Size
-				radiomics.AertsShape.compute(iv.data, ivMask, iv.pixelDimensions, ...
+				radiomics.AertsShape.compute(ivMask, iv.pixelDimensions, ...
 					results);
 				% Texture
 				radiomics.AertsTexture.compute(iv.data, ivMask, results);
+				% Wavelet decompositions
+				transform = radiomics.Wavelet.dwt3u(iv.data, 'coif1', 'mode', 'zpd');
+				dirString = {'L','H'};
+				for i=1:2
+					for j=1:2
+						for k=1:2
+							prefix = [dirString{i},dirString{j},dirString{k}];
+							this.logger.info(...
+								@() sprintf('Processing wavelet decomposition: %s', ...
+									prefix));
+							dirResults = this.processDecomp(transform.dec{i,j,k}, ...
+								ivMask, prefix);
+							results = [results; dirResults];
+						end
+					end
+				end
 				this.outputResults(results);
 			end
 		end
