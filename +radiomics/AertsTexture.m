@@ -112,33 +112,27 @@ classdef AertsTexture
 			[directions,nDir] = AertsTexture.directions();
 			result = zeros(nDir, nG, nR);
 			sz = size(image3D);
+			maskedImage = image3D.*mask3D;
+			maskedIdx = cell(nG, 1);
+			for i=1:nG
+				maskedIdx{i} = find(maskedImage == i);
+			end
 			for k=1:nDir
 				p = zeros(nG, nR);
 				currDir = squeeze(directions(k,:));
 				for i=1:nG
-					% Clone the source volume
-					currImage = image3D;
 					% Find all the pixels with the current grey level
-					idx = find((mask3D == 1) & (image3D == i));
+					idx = maskedIdx{i};
 					nPixels = numel(idx);
 					for j=1:nPixels
 						% Pixel may have been zeroed if it is already part of a run.
 						% Pixel must be a start of a run.
-						if ((currImage(idx(j)) ~= i) || ...
-							 ~AertsTexture.isRunStart(currImage, idx(j), currDir))
+						if ((maskedImage(idx(j)) ~= i) || ...
+							 ~AertsTexture.isRunStart(maskedImage, idx(j), currDir))
 							continue;
 						end
-						runLength = AertsTexture.findRunLength(currImage, idx(j), ...
+						runLength = AertsTexture.findRunLength(maskedImage, idx(j), ...
 							currDir, nR);
-						% Zero out the run
-						currImage(idx(j)) = 0;
-						for m=1:runLength-1
-							[y,x,z] = ind2sub(sz, idx(j));
-							dirY = y+m*currDir(1);
-							dirX = x+m*currDir(2);
-							dirZ = z+m*currDir(3);
-							currImage(dirY,dirX,dirZ) = 0;
-						end
 						p(i,runLength) = p(i,runLength)+1;
 					end
 				end
