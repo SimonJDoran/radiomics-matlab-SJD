@@ -77,6 +77,32 @@ classdef Main < handle
 		end
 
 		%-------------------------------------------------------------------------
+		function iv = createImageVolume(this, roi)
+			roiImageRefs = roi.getImageReferenceList();
+			this.loadImageReferences(roiImageRefs);
+			seriesUid = this.instSeriesMap(roiImageRefs.get(1).sopInstanceUid);
+			iv = this.seriesVolumeMap(seriesUid);
+		end
+
+		%-------------------------------------------------------------------------
+		function ivMask = createVolumeMask(~, iv, roi)
+			[nY,nX,nZ] = size(iv.data);
+			ivMask = zeros(nY, nX, nZ);
+			contourList = roi.getContourList();
+			for n=1:contourList.size()
+				contour = contourList.get(n);
+				% Assume only ever be one image referenced in a contour.
+				contourRef = contour.getImageReferenceList().toArray();
+				% Assume single frame images
+				ivIdx = find(cellfun(@(c) strcmp(c, contourRef.sopInstanceUid), ...
+					iv.sopInstUids));
+				points = contour.getContourPointsList();
+				mask = poly2mask(points(:,1), points(:,2), nY, nX);
+				ivMask(:,:,ivIdx) = mask;
+			end
+		end
+
+		%-------------------------------------------------------------------------
 		function insertSeries(this, series)
 			if (isempty(series))
 				return;
@@ -107,7 +133,7 @@ classdef Main < handle
 		end
 
 		%-------------------------------------------------------------------------
-		function outputResults(this, results)
+		function outputResults(~, results)
 			import radiomics.*;
 			metrics = Aerts.getMetrics();
 			prefix = {'', 'LLL.', 'LLH.', 'LHL.', 'LHH.', 'HLL.', 'HLH.', 'HHL.', 'HHH.'};
@@ -123,7 +149,7 @@ classdef Main < handle
 		end
 
 		%-------------------------------------------------------------------------
-		function decompResults = processDecomp(this, decomp, mask, prefix)
+		function decompResults = processDecomp(~, decomp, mask, prefix)
 			results = containers.Map('KeyType', 'char', 'ValueType', 'any');
 			% First-order stats
 			radiomics.AertsStatistics.compute(decomp, mask, results);
@@ -141,58 +167,46 @@ classdef Main < handle
 		function processRtStruct(this, rtStruct)
 			this.logger.info(@() sprintf('Processing RtStruct: %s', ...
 				rtStruct.label));
-% 			figure;
-% 			colormap(gray);
 			roiList = rtStruct.getRoiList();
 			nRoi = roiList.size();
 			for m=1:nRoi
 				roi = roiList.get(m);
 				this.logger.info(@() sprintf('Processing RtRoi: %s (%d of %d)', ...
 					roi.name, m, nRoi));
-				roiImageRefs = roi.getImageReferenceList();
-				this.loadImageReferences(roiImageRefs);
-				seriesUid = this.instSeriesMap(roiImageRefs.get(1).sopInstanceUid);
-				iv = this.seriesVolumeMap(seriesUid);
-%				clims = [min(iv.data(:)), max(iv.data(:))];
-				[nY,nX,nZ] = size(iv.data);
-				ivMask = zeros(nY, nX, nZ);
-				contourList = roi.getContourList();
-				for n=1:contourList.size()
-					contour = contourList.get(n);
-					% Assume only ever be one image referenced in a contour.
-					contourRef = contour.getImageReferenceList().toArray();
-					% Assume single frame images
-					ivIdx = find(cellfun(@(c) strcmp(c, contourRef.sopInstanceUid), ...
-						iv.sopInstUids));
-					points = contour.getContourPointsList();
-					mask = poly2mask(points(:,1), points(:,2), nY, nX);
-					ivMask(:,:,ivIdx) = mask;
-				end
+				iv = this.createImageVolume(roi);
+				ivMask = this.createVolumeMask(iv, roi);
+
+				% Native pixels
 				results = containers.Map('KeyType', 'char', 'ValueType', 'any');
-				% First-order stats
 				radiomics.AertsStatistics.compute(iv.data, ivMask, results);
-				% Shape/Size
-				radiomics.AertsShape.compute(ivMask, iv.pixelDimensions, ...
-					results);
-				% Texture
+				radiomics.AertsShape.compute(ivMask, iv.pixelDimensions, results);
 				radiomics.AertsTexture.compute(iv.data, ivMask, results);
+
 				% Wavelet decompositions
-				transform = radiomics.Wavelet.dwt3u(iv.data, 'coif1', 'mode', 'zpd');
-				dirString = {'L','H'};
-				for i=1:2
-					for j=1:2
-						for k=1:2
-							prefix = [dirString{i},dirString{j},dirString{k}];
-							this.logger.info(...
-								@() sprintf('Processing wavelet decomposition: %s', ...
-									prefix));
-							dirResults = this.processDecomp(transform.dec{i,j,k}, ...
-								ivMask, prefix);
-							results = [results; dirResults];
+				this.processWavelet(iv.data, ivMask, results);
+
+				this.outputResults(results);
+			end
+		end
+
+		%-------------------------------------------------------------------------
+		function results = processWavelet(this, data, mask, results)
+			transform = radiomics.Wavelet.dwt3u(data, 'coif1', 'mode', 'zpd');
+			dirString = {'L','H'};
+			for i=1:2
+				for j=1:2
+					for k=1:2
+						prefix = [dirString{i},dirString{j},dirString{k}];
+						this.logger.info(...
+							@() sprintf('Processing wavelet decomposition: %s', prefix));
+						dirResults = this.processDecomp(transform.dec{i,j,k}, ...
+							mask, prefix);
+						dirKeys = dirResults.keys();
+						for m=1:numel(dirKeys)
+							results(dirKeys{m}) = dirResults(dirKeys{m});
 						end
 					end
 				end
-				this.outputResults(results);
 			end
 		end
 

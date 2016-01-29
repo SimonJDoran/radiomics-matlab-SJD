@@ -34,10 +34,19 @@ classdef AertsTextureTest < matlab.unittest.TestCase
 		function testGlcm3D(this)
 			import radiomics.*;
 			image3D = repmat(1:this.nX, this.nY, 1, this.nZ);
-			this.mask3D(11:14,15:18,4:5) = 1;
+			this.mask3D(11:14,13:20,4:5) = 1;
 			image3D = AertsTexture.discretise(image3D, this.mask3D, this.nG);
-			[result,nDir] = AertsTexture.glcm3D(image3D, this.mask3D, this.nG);
-			this.verifyEqual(size(result), [nDir,this.nG,this.nG]);
+			[~,nDir] = AertsTexture.glcm3D(image3D, this.mask3D, this.nG);
+			for i=1:this.nG
+				constGlcmAll = zeros(nDir,this.nG,this.nG);
+				constGlcmAll(1:13,i,i) = [21;24;21;28;32;28;21;24;21;42;48;42;56];
+				constant3D = repmat(i, this.nY, this.nX, this.nZ);
+				% Not normalised to allow inspection of pixel counts
+				result = AertsTexture.glcm3D(constant3D, this.mask3D, this.nG, false);
+				this.verifyEqual(size(result), [nDir,this.nG,this.nG]);
+				this.verifyTrue(all(result(:) == constGlcmAll(:)), ...
+					sprintf('GLCM not verified for GL: %d', i));
+			end
 		end
 
 		function testGlrlm3D(this)

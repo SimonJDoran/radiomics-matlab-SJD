@@ -57,9 +57,8 @@ classdef AertsTexture
 			image3D = AertsTexture.discretise(inImage3D, mask3D, nG);
 			AertsTexture.glcmMetrics(image3D, mask3D, nG, collector);
 			% Max run length is largest array dimension
-%			sz = size(image3D);
-%			nR = max(sz);
-			nR = 10;
+			sz = size(image3D);
+			nR = max(sz);
 			AertsTexture.glrlmMetrics(image3D, mask3D, nG, nR, collector);
 		end
 
@@ -75,33 +74,42 @@ classdef AertsTexture
 		end
 
 		%-------------------------------------------------------------------------
-		function [result,nDir] = glcm3D(image3D, mask3D, nG)
+		function [result,nDir] = glcm3D(image3D, mask3D, nG, fNormalise)
 			import radiomics.*;
-			[directions,nDir] = AertsTexture.directions();
+			if nargin < 4
+				fNormalise = true;
+			end
+			[directions,nDir] = AertsTexture.directions3D();
 			result = zeros(nDir, nG, nG);
 			% Linear subscripts of voxels in ROI
 			idx = find(mask3D == 1);
 			sz = size(image3D);
+			maskedImage = image3D.*mask3D;
 			for k=1:nDir
 				p = zeros(nG, nG);
 				% Compute linear subscripts of the voxels in the current direction
 				% from voxels in ROI
+				currDir = squeeze(directions(k,:));
 				[dirY,dirX,dirZ] = ind2sub(sz, idx);
-				dirY = dirY+directions(k,1);
-				dirX = dirX+directions(k,2);
-				dirZ = dirZ+directions(k,3);
+				dirY = dirY+currDir(1);
+				dirX = dirX+currDir(2);
+				dirZ = dirZ+currDir(3);
 				dirIdx = sub2ind(sz, dirY, dirX, dirZ);
 				% GLCM for current direction
 				for i=1:nG
 					for j=1:nG
 						p(i,j) = ...
-							nnz((image3D(idx) == i) & (image3D(dirIdx) == j));
+							nnz((maskedImage(idx) == i) & (maskedImage(dirIdx) == j));
 					end
 				end
 				% Normalise
-				sumP = sum(p(:));
-				if sumP > 0
-					result(k,:,:) = p/sumP;
+				if fNormalise
+					sumP = sum(p(:));
+					if sumP > 0
+						result(k,:,:) = p/sumP;
+					end
+				else
+					result(k,:,:) = p;
 				end
 			end
 		end
@@ -109,7 +117,7 @@ classdef AertsTexture
 		%-------------------------------------------------------------------------
 		function [result,nDir] = glrlm3D(image3D, mask3D, nG, nR)
 			import radiomics.*;
-			[directions,nDir] = AertsTexture.directions();
+			[directions,nDir] = AertsTexture.directions3D();
 			result = zeros(nDir, nG, nR);
 			maskedImage = image3D.*mask3D;
 			% Find the pixels matching each grey level
@@ -217,7 +225,7 @@ classdef AertsTexture
 		end
 
 		%-------------------------------------------------------------------------
-		function [directions,nDir] = directions()
+		function [directions,nDir] = directions3D()
 			% Compute the (dY,dX,dZ) vectors for each direction from chosen pixel
 			% Directions that are opposite of another direction are omitted.
 			nDir = 13;
