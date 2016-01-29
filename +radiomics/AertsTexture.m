@@ -111,24 +111,23 @@ classdef AertsTexture
 			import radiomics.*;
 			[directions,nDir] = AertsTexture.directions();
 			result = zeros(nDir, nG, nR);
-			sz = size(image3D);
 			maskedImage = image3D.*mask3D;
-			maskedIdx = cell(nG, 1);
+			% Find the pixels matching each grey level
+			maskedIdx = find(maskedImage ~= 0);
+			glIdx = cell(nG, 1);
 			for i=1:nG
-				maskedIdx{i} = find(maskedImage == i);
+				idx = find(maskedImage(maskedIdx) == i);
+				glIdx{i} = maskedIdx(idx);
 			end
 			for k=1:nDir
 				p = zeros(nG, nR);
 				currDir = squeeze(directions(k,:));
 				for i=1:nG
-					% Find all the pixels with the current grey level
-					idx = maskedIdx{i};
+					idx = glIdx{i};
 					nPixels = numel(idx);
 					for j=1:nPixels
-						% Pixel may have been zeroed if it is already part of a run.
 						% Pixel must be a start of a run.
-						if ((maskedImage(idx(j)) ~= i) || ...
-							 ~AertsTexture.isRunStart(maskedImage, idx(j), currDir))
+						if (~AertsTexture.isRunStart(maskedImage, idx(j), currDir))
 							continue;
 						end
 						runLength = AertsTexture.findRunLength(maskedImage, idx(j), ...
