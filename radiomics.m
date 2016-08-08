@@ -1,3 +1,2 @@
-main = radiomics.Main();
+main = radiomics.MainUi(true);
 main.run();
-main.delete();

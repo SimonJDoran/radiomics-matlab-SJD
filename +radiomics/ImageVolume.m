@@ -2,6 +2,7 @@ classdef ImageVolume < handle
 	%IMAGEVOLUME Summary of this class goes here
 	%   Detailed explanation goes here
 	
+	%----------------------------------------------------------------------------
 	properties(SetAccess=private)
 		data;
 		frameNumbers;
@@ -11,9 +12,22 @@ classdef ImageVolume < handle
 		seriesUid;
 		sopInstUids;
 	end
-	
+
+	%----------------------------------------------------------------------------
 	methods
-		function this = ImageVolume(series)
+		%-------------------------------------------------------------------------
+		function this = ImageVolume(arg)
+			if (isa(arg, 'etherj.dicom.Series'))
+				toolkit = ether.dicom.Toolkit.getToolkit();
+				series = toolkit.createSeries(arg);
+			else
+				if (isa(arg, 'ether.dicom.Series'))
+					series = arg;
+				else
+					throw(MException('Radiomics:ImageVolume', ...
+						['Illegal argument: ',class(arg)]));
+				end
+			end
 			imageArray = series.getImageList().toArray();
 			locs = arrayfun(@(image) image.getSliceLocation(), imageArray);
 			[locs,idx] = sort(locs);
@@ -36,7 +50,8 @@ classdef ImageVolume < handle
 			this.sopInstUids = arrayfun(@(image) {image.getSopInstanceUid()}, ...
 				this.images);
 		end
+
 	end
-	
+
 end
 

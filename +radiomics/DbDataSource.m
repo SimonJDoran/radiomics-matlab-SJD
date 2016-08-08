@@ -23,19 +23,34 @@ classdef DbDataSource < radiomics.DataSource
 	%----------------------------------------------------------------------------
 	methods
 		%-------------------------------------------------------------------------
-		function this = DbDataSource()
+		function this = DbDataSource(aimDb, dcmDb)
 			import ether.dicom.*;
 			this.etherDcmToolkit = Toolkit.getToolkit();
 			this.jDcmToolkit = etherj.dicom.DicomToolkit.getToolkit();
-			this.dcmDb = this.jDcmToolkit.createDicomDatabase();
 			this.jAimToolkit = etherj.aim.AimToolkit.getToolkit();
-			this.aimDb = this.jAimToolkit.createAimDatabase();
+			if (nargin ~= 2)
+				this.dcmDb = this.jDcmToolkit.createDicomDatabase();
+				this.aimDb = this.jAimToolkit.createAimDatabase();
+			else
+				this.aimDb = aimDb;
+				this.dcmDb = dcmDb;
+			end
 		end
 
 		%-------------------------------------------------------------------------
 		function delete(this)
 			this.safeShutdown(this.aimDb);
 			this.safeShutdown(this.dcmDb);
+		end
+
+		%-------------------------------------------------------------------------
+		function importAim(this, dir)
+			this.aimDb.importDirectory(dir);
+		end
+
+		%-------------------------------------------------------------------------
+		function importDicom(this, dir)
+			this.dcmDb.importDirectory(dir);
 		end
 
 		%-------------------------------------------------------------------------
@@ -78,7 +93,26 @@ classdef DbDataSource < radiomics.DataSource
 			list.addAll(rtList);
 			list.addAll(aimList);
 		end
-	
+
+		%-------------------------------------------------------------------------
+		function iacList = searchIac(this, patient, varargin)
+			import radiomics.*;
+			import ether.aim.*;
+			iacList = ether.collect.CellArrayList(...
+				'ether.aim.ImageAnnotationCollection');
+
+			jParser = this.jAimToolkit.createXmlParser();
+			jFileUidPairs = this.aimDb.search(patient);
+			for i=0:jFileUidPairs.size()-1
+				try
+					jIac = jParser.parse(jFileUidPairs.get(i).getPath());
+					iacList.add(ImageAnnotationCollection(jIac));
+				catch ex
+					this.logger.warn(['DbDataSource::searchIac(): ',ex.message]);
+				end
+			end
+		end
+
 	end
 
 	%----------------------------------------------------------------------------

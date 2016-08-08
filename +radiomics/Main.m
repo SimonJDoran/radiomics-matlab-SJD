@@ -133,8 +133,10 @@ classdef Main < handle
 		end
 
 		%-------------------------------------------------------------------------
-		function outputResults(~, results)
+		function outputResults(~, rtStruct, results)
 			import radiomics.*;
+			fprintf('PatientName: %s\n', rtStruct.patientName);
+			fprintf('LesionName: %s\n', rtStruct.label);
 			metrics = Aerts.getMetrics();
 			prefix = {'', 'LLL.', 'LLH.', 'LHL.', 'LHH.', 'HLL.', 'HLH.', 'HHL.', 'HHH.'};
 			for j=1:numel(prefix)
@@ -185,7 +187,7 @@ classdef Main < handle
 				% Wavelet decompositions
 				this.processWavelet(iv.data, ivMask, results);
 
-				this.outputResults(results);
+				this.outputResults(rtStruct, results);
 			end
 		end
 
