@@ -46,7 +46,12 @@ classdef XnatDataSource < radiomics.DataSource
 			iacList = ether.collect.CellArrayList(...
 				'ether.aim.ImageAnnotationCollection');
 
-			jIacList = this.xds.searchIac('BRC_RADPRIM', patient);
+			if ((nargin == 3) && ischar(varargin{1}))
+				projectId = varargin{1};
+			else
+				projectId = '';
+			end
+			jIacList = this.xds.searchIac(projectId, patient);
 			for i=0:jIacList.size()-1
 				jIac = jIacList.get(i);
 				iacList.add(ether.aim.ImageAnnotationCollection(jIac));

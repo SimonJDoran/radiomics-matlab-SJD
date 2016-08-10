@@ -23,6 +23,7 @@ classdef MainUi < ether.app.AbstractGuiApplication
 		jOutputText;
 		lesionEdit;
 		nLogLines = 0;
+		options = [];
 		outputLog = {};
 		outputPanel;
 		outputText;
@@ -33,7 +34,6 @@ classdef MainUi < ether.app.AbstractGuiApplication
 		searchPanel;
 		table;
 		tableSelection = {};
-		targetPath = '';
 		% Map<SeriesUid,Series>
 		refSeriesMap = [];
 		% Map<SeriesUid,Matrix3D>
@@ -57,6 +57,11 @@ classdef MainUi < ether.app.AbstractGuiApplication
 		end
 
 		%-------------------------------------------------------------------------
+		function delete(this)
+			this.saveOptions();
+		end
+
+		%-------------------------------------------------------------------------
 		function run(this)
 			import radiomics.*;
 			this.productName = 'RadiomicsUI';
@@ -68,6 +73,24 @@ classdef MainUi < ether.app.AbstractGuiApplication
 
 	%----------------------------------------------------------------------------
 	methods(Access=protected)
+		%-------------------------------------------------------------------------
+		function initApplication(this)
+			optionsFile = [this.productDir,this.productTag,'_options.xml'];
+			io = radiomics.OptionsIo();
+			if (exist(optionsFile, 'file') ~= 2)
+				this.options = radiomics.Options();
+				io.write(this.options, optionsFile);
+			else
+				this.options = io.read(optionsFile);
+				if isempty(this.options)
+					this.options = radiomics.Options();
+				end
+			end
+			if isempty(this.options.projectId)
+				this.options.projectId = 'BRC_RADPRIM';
+			end
+		end
+
 		%-------------------------------------------------------------------------
 		function initComponents(this)
 			this.initMenuBar();
@@ -139,6 +162,7 @@ classdef MainUi < ether.app.AbstractGuiApplication
 			this.dirText = uicontrol(outputStrip, 'Style', 'edit');
 			this.dirText.HorizontalAlignment = 'left';
 			this.dirText.Enable = 'inactive';
+			this.dirText.String = this.options.targetPath;
 			this.dirButton = uicontrol(outputStrip, 'Style', 'pushbutton', ...
 				'String', 'Output...');
 			this.dirButton.Callback = @this.onOutputDir;
@@ -305,9 +329,9 @@ classdef MainUi < ether.app.AbstractGuiApplication
 			if iaItemList.size() < 1
 				return;
 			end
-			if isempty(this.targetPath)
+			if isempty(this.options.targetPath)
 				this.selectTargetPath();
-				if isempty(this.targetPath)
+				if isempty(this.options.targetPath)
 					return;
 				end
 			end
@@ -324,8 +348,9 @@ classdef MainUi < ether.app.AbstractGuiApplication
 				rtStruct = this.dataSource.getRtStructForMarkup(...
 					markups(1).uniqueIdentifier);
 				if isempty(rtStruct)
-					this.logWarn(@() sprintf('No RT-STRUCT found for Markup UID: %s', ...
-						markups(1).uniqueIdentifier));
+					this.logWarn(@() sprintf(...
+						'No RT-STRUCT found for Patient %s, Markup UID: %s', ...
+						iaItem.personName, markups(1).uniqueIdentifier));
 					continue;
 				end
 				rtStructList.add(rtStruct);
@@ -340,6 +365,8 @@ classdef MainUi < ether.app.AbstractGuiApplication
 			this.buildRefSeriesMap(rtStructList);
 			for i=1:rtStructList.size()
 				rtStruct = rtStructList.get(i);
+				this.logInfo(@() sprintf('Processing RtStruct (%d of %d)', ...
+					i, rtStructList.size()));
 				ia = iaList.get(i);
 				markup = markupList.get(i);
 				this.processRtStruct(rtStruct, ia, markup);
@@ -357,8 +384,10 @@ classdef MainUi < ether.app.AbstractGuiApplication
 % 			scanItems = get(this.scanList, 'String');
 % 			scanIdx = get(this.scanList, 'Value');
 %			scanStr = scanItems{scanIdx};
-			this.logInfo(@() sprintf('Searching for patients like "%s"...', patStr));
-			iacList = this.dataSource.searchIac(patStr);
+			this.logInfo(@() sprintf(...
+				'Searching for patients like "%s" in project %s...', ...
+				patStr, this.options.projectId));
+			iacList = this.dataSource.searchIac(patStr, this.options.projectId);
 			if iacList.size() == 0
 				message = sprintf('No results for: %s', patStr);
 				this.logInfo(message);
@@ -394,14 +423,22 @@ classdef MainUi < ether.app.AbstractGuiApplication
 		end
 
 		%-------------------------------------------------------------------------
+		function saveOptions(this)
+			optionsFile = [this.productDir,this.productTag,'_options.xml'];
+			io = radiomics.OptionsIo();
+			io.write(this.options, optionsFile);
+		end
+
+		%-------------------------------------------------------------------------
 		function selectTargetPath(this)
-			path = uigetdir(this.targetPath, 'Select results directory');
+			path = uigetdir(this.options.targetPath, 'Select results directory');
 			if isempty(path)
 				return;
 			end
-			this.targetPath = [path,filesep()];
-			this.dirText.String = this.targetPath;
-			this.logInfo(@() ['Results directory set to: ',this.targetPath]);
+			this.options.targetPath = [path,filesep()];
+			this.dirText.String = this.options.targetPath;
+			this.logInfo(@() ['Results directory set to: ',this.options.targetPath]);
+			this.saveOptions();
 			drawnow();
 		end
 
@@ -442,11 +479,14 @@ classdef MainUi < ether.app.AbstractGuiApplication
 				refSeriesUidList = rtStruct.getReferencedSeriesUidList();
 				for j=1:refSeriesUidList.size()
 					refSeriesUid = refSeriesUidList.get(j);
+					if this.refSeriesMap.isKey(refSeriesUid)
+						continue;
+					end
 					series = this.dataSource.getImageSeries(refSeriesUid, ...
 						DataSource.Series);
 					this.insertSeries(series);
-					this.logInfo(@() sprintf('Series: %d - %s', series.number, ...
-						series.description));
+					this.logInfo(@() sprintf('Series: %d - %s (%s)', series.number, ...
+						series.description, series.instanceUid));
 				end
 			end
 			this.logInfo(@() sprintf('%d referenced series loaded', ...
@@ -528,7 +568,7 @@ classdef MainUi < ether.app.AbstractGuiApplication
 		%-------------------------------------------------------------------------
 		function outputResults(this, rtStruct, results, ia, markup)
 			import radiomics.*;
-			patDir = [this.targetPath,rtStruct.patientName,filesep()];
+			patDir = [this.options.targetPath,rtStruct.patientName,filesep()];
 			if (exist(patDir, 'dir') == 0)
 				mkdir(patDir);
 			end
@@ -569,8 +609,8 @@ classdef MainUi < ether.app.AbstractGuiApplication
 
 		%-------------------------------------------------------------------------
 		function processRtStruct(this, rtStruct, ia, markup)
-			this.logInfo(@() sprintf('Processing RtStruct: %s', ...
-				rtStruct.name));
+			this.logInfo(@() sprintf('Processing Patient %s, RtStruct: %s', ...
+				rtStruct.patientName, rtStruct.name));
 			roiList = rtStruct.getRoiList();
 			nRoi = roiList.size();
 			for m=1:nRoi

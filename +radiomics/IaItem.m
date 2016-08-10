@@ -57,7 +57,7 @@ classdef IaItem < handle
 			end
 			this.lesionNumber = value;
 			endIdx = 0;
-			while isstrprop(tokens{3}(endIdx+1), 'digit')
+			while ((endIdx < length(tokens{3})) && isstrprop(tokens{3}(endIdx+1), 'digit'))
 				endIdx = endIdx+1;
 			end
 			value = str2double(tokens{3}(1:endIdx));
