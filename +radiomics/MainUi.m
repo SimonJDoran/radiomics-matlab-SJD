@@ -323,15 +323,18 @@ classdef MainUi < ether.app.AbstractGuiApplication
 
 		%-------------------------------------------------------------------------
 		function onProcess(this, ~, ~)
+			this.frame.Pointer = 'watch';
 			rowIdx = unique(this.tableSelection(:,1));
 			nRows = length(rowIdx);
-			iaItemList = this.table.UserData;
-			if iaItemList.size() < 1
+			iaItems = this.table.UserData;
+			if isempty(iaItems)
+				this.frame.Pointer = 'arrow';
 				return;
 			end
 			if isempty(this.options.targetPath)
 				this.selectTargetPath();
 				if isempty(this.options.targetPath)
+					this.frame.Pointer = 'arrow';
 					return;
 				end
 			end
@@ -341,7 +344,7 @@ classdef MainUi < ether.app.AbstractGuiApplication
 			iaList = ether.collect.CellArrayList('ether.aim.ImageAnnotation');
 			markupList = ether.collect.CellArrayList('ether.aim.Markup');
 			for i=1:nRows
-				iaItem = iaItemList.get(rowIdx(i));
+				iaItem = iaItems(rowIdx(i));
 				iaList.add(iaItem.ia);
 				% Only deal with one markup per annotation for now
 				markups = iaItem.ia.getAllMarkups;
@@ -359,22 +362,26 @@ classdef MainUi < ether.app.AbstractGuiApplication
 			if rtStructList.isEmpty()
 				message = sprintf('No RT-STRUCTs found');
 				this.logWarn(message);
+				this.frame.Pointer = 'arrow';
 				msgbox(message, 'Process', 'warn', 'modal');
 				return;
 			end
 			this.buildRefSeriesMap(rtStructList);
 			for i=1:rtStructList.size()
 				rtStruct = rtStructList.get(i);
-				this.logInfo(@() sprintf('Processing RtStruct (%d of %d)', ...
+				this.logInfo(@() sprintf('Processing RT-STRUCT (%d of %d)', ...
 					i, rtStructList.size()));
 				ia = iaList.get(i);
 				markup = markupList.get(i);
 				this.processRtStruct(rtStruct, ia, markup);
 			end
+			this.logInfo(@() sprintf('Processing RT-STRUCTs complete'));
+			this.frame.Pointer = 'arrow';
 		end
 
 		%-------------------------------------------------------------------------
 		function onSearch(this, ~, ~)
+			this.frame.Pointer = 'watch';
 			this.table.UserData = [];
 			this.table.Data = [];
 			drawnow();
@@ -392,6 +399,7 @@ classdef MainUi < ether.app.AbstractGuiApplication
 				message = sprintf('No results for: %s', patStr);
 				this.logInfo(message);
 				msgbox(message, 'Search', 'warn', 'modal');
+				this.frame.Pointer = 'arrow';
 				return;
 			end
 
@@ -404,8 +412,8 @@ classdef MainUi < ether.app.AbstractGuiApplication
 					iaItemList.add(iaItem);
 				end
 			end
+
 			% ToDo: Filter the iaItemList for lesion and scan matches
-			this.table.UserData = iaItemList;
 			nCols = 6;
 			data = cell(iaItemList.size(), nCols);
 			items = this.sortIaItemsArray(iaItemList.toArray());
@@ -418,8 +426,10 @@ classdef MainUi < ether.app.AbstractGuiApplication
 				data{i,5} = item.lesionNumber;
 				data{i,6} = item.roiNumber;
 			end
+			this.table.UserData = items;
 			this.table.Data = data;
 			this.logInfo(@() sprintf('Search complete'));
+			this.frame.Pointer = 'arrow';
 		end
 
 		%-------------------------------------------------------------------------
@@ -609,7 +619,7 @@ classdef MainUi < ether.app.AbstractGuiApplication
 
 		%-------------------------------------------------------------------------
 		function processRtStruct(this, rtStruct, ia, markup)
-			this.logInfo(@() sprintf('Processing Patient %s, RtStruct: %s', ...
+			this.logInfo(@() sprintf('Processing Patient %s, RT-STRUCT: %s', ...
 				rtStruct.patientName, rtStruct.name));
 			roiList = rtStruct.getRoiList();
 			nRoi = roiList.size();
