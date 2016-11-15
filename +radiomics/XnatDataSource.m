@@ -4,7 +4,7 @@ classdef XnatDataSource < radiomics.DataSource
 	
 	%----------------------------------------------------------------------------
 	properties(Constant,Access=private)
-		logger = ether.log4m.Logger.getLogger('radiomics.DbDataSource');
+		logger = ether.log4m.Logger.getLogger('radiomics.XnatDataSource');
 	end
 
 	%----------------------------------------------------------------------------
@@ -18,10 +18,10 @@ classdef XnatDataSource < radiomics.DataSource
 		%-------------------------------------------------------------------------
 		function this = XnatDataSource()
 			xnatToolkit = etherj.xnat.XnatToolkit.getToolkit();
-% 			this.conn = xnatToolkit.createServerConnection(...
-% 				'https://bifrost.icr.ac.uk:8443/XNAT_ROI', 'jamesd', 'Trl-50%');
 			this.conn = xnatToolkit.createServerConnection(...
-				'https://bifrost.icr.ac.uk:8443/XNAT_ROI', 'admin', 'XN_admin-2015');
+				'https://bifrost.icr.ac.uk:8443/XNAT_ROI', 'jamesd', 'Trl-50%');
+% 			this.conn = xnatToolkit.createServerConnection(...
+% 				'https://bifrost.icr.ac.uk:8443/XNAT_ROI', 'admin', 'XN@T_roi-2016');
 			this.conn.open();
 			this.xds = xnatToolkit.createDataSource(this.conn);
 		end
@@ -32,8 +32,8 @@ classdef XnatDataSource < radiomics.DataSource
 		end
 
 		%-------------------------------------------------------------------------
-		function rtStruct = getRtStructForMarkup(this, markupUid)
-			jRtStruct = this.xds.getRtStructForMarkup(markupUid);
+		function rtStruct = getRtStructForMarkup(this, projectId, markupUid)
+			jRtStruct = this.xds.getRtStructForMarkup(projectId, markupUid);
 			if ~isempty(jRtStruct)
 				rtStruct = ether.dicom.RtStruct(jRtStruct);
 			else
@@ -59,7 +59,7 @@ classdef XnatDataSource < radiomics.DataSource
 		end
 
 		%-------------------------------------------------------------------------
-		function series = getImageSeries(this, uid, type, varargin)
+		function series = getImageSeries(this, projectId, uid, type, varargin)
 			import radiomics.*;
 			series = [];
 			switch type
@@ -67,7 +67,7 @@ classdef XnatDataSource < radiomics.DataSource
 					this.logger.warn('DataSource::getImageSeries(): Study-wide search not supported');
 
 				case DataSource.Series
-					jSeries = this.xds.getSeries(uid);
+					jSeries = this.xds.getSeries(projectId, uid);
 					series = ether.dicom.Toolkit.getToolkit().createSeries(jSeries);
 
 				case DataSource.Instance

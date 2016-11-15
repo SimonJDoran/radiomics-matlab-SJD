@@ -84,6 +84,9 @@ classdef AertsTexture
 			% Linear subscripts of voxels in ROI
 			idx = find(mask3D == 1);
 			sz = size(image3D);
+			nY = sz(1);
+			nX = sz(2);
+			nZ = sz(3);
 			maskedImage = image3D.*mask3D;
 			for k=1:nDir
 				p = zeros(nG, nG);
@@ -94,12 +97,22 @@ classdef AertsTexture
 				dirY = dirY+currDir(1);
 				dirX = dirX+currDir(2);
 				dirZ = dirZ+currDir(3);
-				dirIdx = sub2ind(sz, dirY, dirX, dirZ);
-				% GLCM for current direction
-				for i=1:nG
-					for j=1:nG
-						p(i,j) = ...
-							nnz((maskedImage(idx) == i) & (maskedImage(dirIdx) == j));
+				% Include only voxels which are actually inside the volume
+				validIdx = (dirY > 0) & (dirY <= nY) & ...
+					(dirX > 0) & (dirX <= nX) & ...
+					(dirZ > 0) & (dirZ <= nZ);
+				dirY = dirY(validIdx);
+				dirX = dirX(validIdx);
+				dirZ = dirZ(validIdx);
+				if (any(validIdx))
+					dirIdx = sub2ind(sz, dirY, dirX, dirZ);
+					filteredIdx = idx(validIdx);
+					% GLCM for current direction
+					for i=1:nG
+						for j=1:nG
+							p(i,j) = ...
+								nnz((maskedImage(filteredIdx) == i) & (maskedImage(dirIdx) == j));
+						end
 					end
 				end
 				% Normalise

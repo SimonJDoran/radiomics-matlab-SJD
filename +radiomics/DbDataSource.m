@@ -11,6 +11,7 @@ classdef DbDataSource < radiomics.DataSource
 	properties(SetAccess=private)
 		aimDb;
 		dcmDb;
+		jDataSource;
 	end
 
 	%----------------------------------------------------------------------------
@@ -54,12 +55,13 @@ classdef DbDataSource < radiomics.DataSource
 		end
 
 		%-------------------------------------------------------------------------
-		function series = getImageSeries(this, uid, type, varargin)
+		function series = getImageSeries(this, projectId, uid, type, varargin)
 			import radiomics.*;
 			series = [];
 			switch type
 				case DataSource.Study
-					this.logger.warn('DataSource::getImageSeries(): Study-wide search not supported');
+					this.logger.warn(...
+						'DataSource::getImageSeries(): Study-wide search not supported');
 
 				case DataSource.Series
 					series = this.getSeries(uid);

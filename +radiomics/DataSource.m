@@ -9,7 +9,7 @@ classdef DataSource < handle
 	end
 	
 	methods(Abstract)
-		series = getImageSeries(this, uid, type, varargin);
+		series = getImageSeries(this, projectId, uid, type, varargin);
 
 		roiList = getRtStructList(this, id, type, varargin);
 	end

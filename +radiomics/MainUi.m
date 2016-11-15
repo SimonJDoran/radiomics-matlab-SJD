@@ -18,6 +18,7 @@ classdef MainUi < ether.app.AbstractGuiApplication
 		dirButton;
 		dirText;
 		exitItem;
+		fuseButton;
 		importAimItem;
 		importDicomItem;
 		jOutputText;
@@ -89,6 +90,7 @@ classdef MainUi < ether.app.AbstractGuiApplication
 			if isempty(this.options.projectId)
 				this.options.projectId = 'BRC_RADPRIM';
 			end
+			this.logInfo(@() sprintf('Project ID: %s', this.options.projectId));
 		end
 
 		%-------------------------------------------------------------------------
@@ -103,6 +105,7 @@ classdef MainUi < ether.app.AbstractGuiApplication
 			this.initSearchPanel(xPad, yPad, gap);
 			this.initTable(xPad, yPad, gap);
 			this.initOutputPanel(xPad, yPad, gap);
+			uicontrol(this.patientEdit);
 
  			movegui(this.frame, 'center');
 		end
@@ -226,6 +229,7 @@ classdef MainUi < ether.app.AbstractGuiApplication
 			searchStrip.Units = 'pixels';
 			this.patientEdit = uicontrol(searchStrip, 'Style', 'edit');
 			this.patientEdit.HorizontalAlignment = 'left';
+			this.patientEdit.KeyReleaseFcn = @this.onEditKeyRelease;
 			this.lesionEdit = uicontrol(searchStrip, 'Style', 'edit');
 			this.lesionEdit.HorizontalAlignment = 'left';
 			this.scanList = uicontrol(searchStrip, 'Style', 'popup', ...
@@ -237,6 +241,10 @@ classdef MainUi < ether.app.AbstractGuiApplication
 				'String', 'Process');
 			this.processButton.Callback = @this.onProcess;
 			this.processButton.Enable = 'off';
+			this.fuseButton = uicontrol(searchStrip, 'Style', 'pushbutton', ...
+				'String', 'Fuse');
+			this.fuseButton.Callback = @this.onFuse;
+			this.fuseButton.Enable = 'off';
 
 			% Position everything
 			labelH = patLabel.Position(4);
@@ -261,6 +269,8 @@ classdef MainUi < ether.app.AbstractGuiApplication
 			this.searchButton.Position = [x yPad buttonW scanH];
 			x = x+buttonW+gap;
 			this.processButton.Position = [x yPad buttonW scanH];
+			x = x+buttonW+gap;
+			this.fuseButton.Position = [x yPad buttonW scanH];
 		end
 
 		%-------------------------------------------------------------------------
@@ -286,6 +296,16 @@ classdef MainUi < ether.app.AbstractGuiApplication
 			this.tableSelection = event.Indices;
 			enable = this.enableStr(~isempty(this.tableSelection));
 			this.processButton.Enable = enable;
+			multi = this.enableStr((numel(this.tableSelection)/2) > 1);
+			this.fuseButton.Enable = multi;
+		end
+
+		%-------------------------------------------------------------------------
+		function onEditKeyRelease(this, source, event)
+			if (~strcmp(event.Key, 'return'))
+				return
+			end
+			this.onSearch();
 		end
 
 		%-------------------------------------------------------------------------
@@ -295,25 +315,71 @@ classdef MainUi < ether.app.AbstractGuiApplication
 		end
 
 		%-------------------------------------------------------------------------
+		function onFuse(this, ~, ~)
+			this.frame.Pointer = 'watch';
+			rowIdx = unique(this.tableSelection(:,1));
+			nRows = length(rowIdx);
+			iaItems = this.table.UserData;
+			if isempty(iaItems)
+				this.frame.Pointer = 'arrow';
+				return;
+			end
+			if isempty(this.options.targetPath)
+				this.selectTargetPath();
+				if isempty(this.options.targetPath)
+					this.frame.Pointer = 'arrow';
+					return;
+				end
+			end
+			this.logInfo(@() sprintf('ROI Fusion: processing %d annotations...', nRows));
+			fuser = radiomics.RoiFuser();
+			iacList = fuser.fuse(iaItems(rowIdx), this.dataSource, ...
+				this.options.projectId);
+			this.logInfo(@() sprintf('ROI Fusion: %i fused ROIs...', ...
+				iacList.size()));
+			for i=1:iacList.size()
+				iac = iacList.get(i);
+				this.saveFusedIac(iac);
+			end
+
+			this.logInfo(@() sprintf('ROI Fusion: processing annotations complete'));
+			this.frame.Pointer = 'arrow';
+		end
+
+		%-------------------------------------------------------------------------
 		function onImportAim(this, ~, ~)
 			import ether.dicom.io.*;
 			title = 'Import AIM Files';
-			path = uigetdir('', title);
+			path = uigetdir(this.options.localImportPath, title);
 			if ~isa(path, 'char')
 				return;
 			end
+			this.frame.Pointer = 'watch';
+			this.options.localImportPath = [path,filesep()];
+			this.logInfo(@() ...
+				['Local AIM import directory: ',this.options.localImportPath]);
+			this.saveOptions();
 			this.dataSource.importAim(path);
+			this.logInfo(@() sprintf('Local AIM import complete'));
+			this.frame.Pointer = 'arrow';
 		end
 
 		%-------------------------------------------------------------------------
 		function onImportDicom(this, ~, ~)
 			import ether.dicom.io.*;
 			title = 'Import DICOM Files';
-			path = uigetdir('', title);
+			path = uigetdir(this.options.localImportPath, title);
 			if ~isa(path, 'char')
 				return;
 			end
+			this.frame.Pointer = 'watch';
+			this.options.localImportPath = [path,filesep()];
+			this.logInfo(@() ...
+				['Local DICOM import directory: ',this.options.localImportPath]);
+			this.saveOptions();
 			this.dataSource.importDicom(path);
+			this.logInfo(@() sprintf('Local DICOM import complete'));
+			this.frame.Pointer = 'arrow';
 		end
 
 		%-------------------------------------------------------------------------
@@ -341,19 +407,25 @@ classdef MainUi < ether.app.AbstractGuiApplication
 			this.logInfo(@() sprintf('Processing %d ROIs...', nRows));
 			this.logInfo(@() sprintf('Fetching RT-STRUCTs'));
 			rtStructList = ether.collect.CellArrayList('ether.dicom.RtStruct');
-			iaList = ether.collect.CellArrayList('ether.aim.ImageAnnotation');
+			iaItemList = ether.collect.CellArrayList('radiomics.IaItem');
 			markupList = ether.collect.CellArrayList('ether.aim.Markup');
 			for i=1:nRows
 				iaItem = iaItems(rowIdx(i));
-				iaList.add(iaItem.ia);
+				iaItemList.add(iaItem);
 				% Only deal with one markup per annotation for now
 				markups = iaItem.ia.getAllMarkups;
+				if (isempty(markups))
+					this.logWarn(@() sprintf(...
+						'ImageAnnotation contains no Markups. Patient %s', ...
+						iaItem.personName));
+					continue;
+				end
 				rtStruct = this.dataSource.getRtStructForMarkup(...
-					markups(1).uniqueIdentifier);
+					this.options.projectId, markups(1).uniqueIdentifier);
 				if isempty(rtStruct)
 					this.logWarn(@() sprintf(...
-						'No RT-STRUCT found for Patient %s, Markup UID: %s', ...
-						iaItem.personName, markups(1).uniqueIdentifier));
+						'No RT-STRUCT found for Patient %s, Markup UID: %s, Lesion: %s, IAC UID: %s', ...
+						iaItem.personName, markups(1).uniqueIdentifier, iaItem.ia.name, iaItem.iac.uniqueIdentifier));
 					continue;
 				end
 				rtStructList.add(rtStruct);
@@ -371,9 +443,9 @@ classdef MainUi < ether.app.AbstractGuiApplication
 				rtStruct = rtStructList.get(i);
 				this.logInfo(@() sprintf('Processing RT-STRUCT (%d of %d)', ...
 					i, rtStructList.size()));
-				ia = iaList.get(i);
+				iaItem = iaItemList.get(i);
 				markup = markupList.get(i);
-				this.processRtStruct(rtStruct, ia, markup);
+				this.processRtStruct(rtStruct, iaItem, markup);
 			end
 			this.logInfo(@() sprintf('Processing RT-STRUCTs complete'));
 			this.frame.Pointer = 'arrow';
@@ -433,55 +505,14 @@ classdef MainUi < ether.app.AbstractGuiApplication
 		end
 
 		%-------------------------------------------------------------------------
-		function saveOptions(this)
-			optionsFile = [this.productDir,this.productTag,'_options.xml'];
-			io = radiomics.OptionsIo();
-			io.write(this.options, optionsFile);
-		end
-
-		%-------------------------------------------------------------------------
-		function selectTargetPath(this)
-			path = uigetdir(this.options.targetPath, 'Select results directory');
-			if isempty(path)
-				return;
-			end
-			this.options.targetPath = [path,filesep()];
-			this.dirText.String = this.options.targetPath;
-			this.logInfo(@() ['Results directory set to: ',this.options.targetPath]);
-			this.saveOptions();
-			drawnow();
-		end
-
-		%-------------------------------------------------------------------------
-		function items = sortIaItemsArray(~, items)
-			% Sort into name order
-			names = arrayfun(@(item) item.personName, items, 'UniformOutput', false);
-			dateTimes = arrayfun(@(item) item.ia.dateTime, items, 'UniformOutput', false);
-			[names,idx] = sort(names);
-			dateTimes = dateTimes(idx);
-			items = items(idx);
-			% Convert dateTimes to uint64
-			dates = cellfun(@(dt) etherj.aim.AimUtils.parseDateTime(dt), dateTimes, 'UniformOutput', false);
-			dateTimes = cellfun(@(dt) dt.getTime(), dates);
-			% Sort each name clump by dateTime
-			uniqueNames = unique(names);
-			startIdx = 1;
-			for i=1:numel(uniqueNames)
-				nameIdx = strcmp(names, uniqueNames{i});
-				[~,dtIdx] = sort(dateTimes(nameIdx));
-				nCurrItems = numel(dtIdx);
-				currItems = items(startIdx:startIdx+nCurrItems-1);
-				items(startIdx:startIdx+nCurrItems-1) = currItems(dtIdx);
-				startIdx = startIdx+nCurrItems;
-			end
-		end
-
-		%-------------------------------------------------------------------------
 		function buildRefSeriesMap(this, rtStructList)
 			import radiomics.*;
-			this.refSeriesMap = containers.Map('KeyType', 'char', 'ValueType', 'any');
-			this.seriesVolumeMap = containers.Map('KeyType', 'char', 'ValueType', 'any');
-			this.instSeriesMap = containers.Map('KeyType', 'char', 'ValueType', 'any');
+			this.refSeriesMap = containers.Map('KeyType', 'char', ...
+				'ValueType', 'any');
+			this.seriesVolumeMap = containers.Map('KeyType', 'char', ...
+				'ValueType', 'any');
+			this.instSeriesMap = containers.Map('KeyType', 'char', ...
+				'ValueType', 'any');
 			this.logInfo(@() sprintf('Fetching referenced series'));
 			nRtStruct = rtStructList.size();
 			for i=1:nRtStruct
@@ -492,11 +523,16 @@ classdef MainUi < ether.app.AbstractGuiApplication
 					if this.refSeriesMap.isKey(refSeriesUid)
 						continue;
 					end
-					series = this.dataSource.getImageSeries(refSeriesUid, ...
-						DataSource.Series);
-					this.insertSeries(series);
-					this.logInfo(@() sprintf('Series: %d - %s (%s)', series.number, ...
-						series.description, series.instanceUid));
+					series = this.dataSource.getImageSeries(this.options.projectId, ...
+						refSeriesUid, DataSource.Series);
+					if ~isempty(series)
+						this.insertSeries(series);
+						this.logInfo(@() sprintf('Series: %d - %s (%s)', series.number, ...
+							series.description, series.instanceUid));
+					else
+						this.logInfo(@() sprintf('Series not found: UID - %s', ...
+							refSeriesUid));
+					end
 				end
 			end
 			this.logInfo(@() sprintf('%d referenced series loaded', ...
@@ -505,14 +541,21 @@ classdef MainUi < ether.app.AbstractGuiApplication
 
 		%-------------------------------------------------------------------------
 		function iv = createImageVolume(this, roi)
+			iv = [];
 			roiImageRefs = roi.getImageReferenceList();
-			this.loadImageReferences(roiImageRefs);
+			if ~this.loadImageReferences(roiImageRefs)
+				return;
+			end
 			seriesUid = this.instSeriesMap(roiImageRefs.get(1).sopInstanceUid);
 			iv = this.seriesVolumeMap(seriesUid);
 		end
 
 		%-------------------------------------------------------------------------
-		function ivMask = createVolumeMask(~, iv, roi)
+		function ivMask = createVolumeMask(this, iv, roi)
+			if isempty(iv)
+				throw(MException('Radiomics:MainUi', ...
+					'ImageVolume not found'));
+			end
 			[nY,nX,nZ] = size(iv.data);
 			ivMask = zeros(nY, nX, nZ);
 			contourList = roi.getContourList();
@@ -546,6 +589,16 @@ classdef MainUi < ether.app.AbstractGuiApplication
 		end
 
 		%-------------------------------------------------------------------------
+		function seriesUid = getReferencedSeriesUid(this, roi)
+			seriesUid = [];
+			roiImageRefs = roi.getImageReferenceList();
+			if ~this.loadImageReferences(roiImageRefs)
+				return;
+			end
+			seriesUid = this.instSeriesMap(roiImageRefs.get(1).sopInstanceUid);
+		end
+
+		%-------------------------------------------------------------------------
 		function insertSeries(this, series)
 			if (isempty(series))
 				return;
@@ -562,32 +615,89 @@ classdef MainUi < ether.app.AbstractGuiApplication
 		end
 
 		%-------------------------------------------------------------------------
-		function loadImageReferences(this, imageRefs)
+		function bool = loadImageReferences(this, imageRefs)
 			import radiomics.*;
+			bool = false;
 			for i=1:imageRefs.size()
 				ref = imageRefs.get(i);
-				if this.instSeriesMap.isKey(ref.sopInstanceUid)
-					continue;
+				if ~this.instSeriesMap.isKey(ref.sopInstanceUid)
+					return;
 				end
-				series = this.dataSource.getImageSeries(ref.sopInstanceUid, ...
-					DataSource.Instance);
-				this.insertSeries(series);
+% 				series = this.dataSource.getImageSeries(ref.sopInstanceUid, ...
+% 					DataSource.Instance);
+% 				this.insertSeries(series);
 			end
+			bool = true;
 		end
 
 		%-------------------------------------------------------------------------
-		function outputResults(this, rtStruct, results, ia, markup)
+		function logDebug(this, msg)
+			this.logger.debug(msg);
+			this.logUi(msg);
+		end
+
+		%-------------------------------------------------------------------------
+		function logInfo(this, msg)
+			this.logger.info(msg);
+			this.logUi(msg);
+		end
+
+		%-------------------------------------------------------------------------
+		function logWarn(this, msg)
+			this.logger.warn(msg);
+			this.logUi(msg);
+		end
+
+		%-------------------------------------------------------------------------
+		function logUi(this, msg)
+			if isempty(this.jOutputText)
+				return;
+			end
+			if ~ischar(msg)
+				msg = msg();
+			end
+			this.outputLog = {this.outputLog{:},msg};
+			this.nLogLines = this.nLogLines+numel(strsplit(msg, '\n'));
+			% Force the outputText's underlying Java object to be multiline.
+			% MATLAB changes the Java object depending if single or multiline.
+			this.outputText.Max = max(this.nLogLines, 2);
+			this.outputText.Value = this.nLogLines;
+			this.outputText.String = this.outputLog;
+			drawnow();
+			this.jOutputText.setCaretPosition(this.jOutputText.getDocument().getLength());
+		end
+
+		%-------------------------------------------------------------------------
+		function outputResults(this, rtStruct, results, iaItem, markup)
 			import radiomics.*;
 			patDir = [this.options.targetPath,rtStruct.patientName,filesep()];
 			if (exist(patDir, 'dir') == 0)
 				mkdir(patDir);
 			end
+			lesionStr = '';
+			if (~isempty(iaItem.scan))
+				if (iaItem.lesionNumber > 0) && (iaItem.roiNumber > 0)
+					lesionStr = sprintf('%s-%03i-%s-%03i', iaItem.personName, ...
+						iaItem.lesionNumber, iaItem.scan, iaItem.roiNumber);
+				else
+					lesionStr = iaItem.scan;
+				end
+			end
+			ia = iaItem.ia;
 			dt = strjoin(strsplit(ia.dateTime, ':'), '-');
-			fileName = [patDir,'AertsResults_',dt,'_',markup.uniqueIdentifier,'.txt'];
+			fileName = [patDir,'AertsResults'];
+			if ~isempty(lesionStr)
+				fileName = [fileName,'_',lesionStr];
+			end
+			fileName = [fileName,'_',dt,'_',markup.uniqueIdentifier,'.txt'];
 			this.logInfo(['Writing results to: ',fileName]);
 			fileId = fopen(fileName, 'w');
 			fprintf(fileId, 'PatientName: %s\n', rtStruct.patientName);
+			fprintf(fileId, 'AnnotationName: %s\n', ia.name);
 			fprintf(fileId, 'LesionName: %s\n', rtStruct.name);
+			if ~isempty(lesionStr)
+				fprintf(fileId, 'LesionId: %s\n', lesionStr);
+			end
 			fprintf(fileId, 'MarkupUid: %s\n', markup.uniqueIdentifier);
 			metrics = Aerts.getMetrics();
 			prefix = {'', 'LLL.', 'LLH.', 'LHL.', 'LHH.', 'HLL.', 'HLH.', 'HHL.', 'HHH.'};
@@ -600,6 +710,7 @@ classdef MainUi < ether.app.AbstractGuiApplication
 					fprintf(fileId, '%s: %f\n', name, results(name));
 				end
 			end
+			fclose(fileId);
 		end
 
 		%-------------------------------------------------------------------------
@@ -618,7 +729,40 @@ classdef MainUi < ether.app.AbstractGuiApplication
 		end
 
 		%-------------------------------------------------------------------------
-		function processRtStruct(this, rtStruct, ia, markup)
+		function [rtStructList,iaItemList,markupList] = processIaItems(this, ...
+			iaItems, rowIdx)
+
+			this.logInfo(@() sprintf('Fetching RT-STRUCTs'));
+			rtStructList = ether.collect.CellArrayList('ether.dicom.RtStruct');
+			iaItemList = ether.collect.CellArrayList('radiomics.IaItem');
+			markupList = ether.collect.CellArrayList('ether.aim.Markup');
+			nRows = numel(rowIdx);
+			for i=1:nRows
+				iaItem = iaItems(rowIdx(i));
+				markups = iaItem.ia.getAllMarkups;
+				nMarkups = numel(markups);
+				if (nMarkups > 1)
+					this.logInfo(@() sprintf('NB: %i markups in annotation!', ...
+						nMarkups));
+				end
+				for j=1:nMarkups
+					rtStruct = this.dataSource.getRtStructForMarkup(...
+						this.options.projectId, markups(j).uniqueIdentifier);
+					if isempty(rtStruct)
+						this.logWarn(@() sprintf(...
+							'No RT-STRUCT found for Patient %s, Markup UID: %s', ...
+							iaItem.personName, markups(1).uniqueIdentifier));
+						continue;
+					end
+					iaItemList.add(iaItem);
+					rtStructList.add(rtStruct);
+					markupList.add(markups(j));
+				end
+			end
+		end
+
+		%-------------------------------------------------------------------------
+		function processRtStruct(this, rtStruct, iaItem, markup)
 			this.logInfo(@() sprintf('Processing Patient %s, RT-STRUCT: %s', ...
 				rtStruct.patientName, rtStruct.name));
 			roiList = rtStruct.getRoiList();
@@ -630,21 +774,25 @@ classdef MainUi < ether.app.AbstractGuiApplication
 				iv = this.createImageVolume(roi);
 				try
 					ivMask = this.createVolumeMask(iv, roi);
+					% Native pixels
+					results = containers.Map('KeyType', 'char', 'ValueType', 'any');
+					radiomics.AertsStatistics.compute(iv.data, ivMask, results);
+					radiomics.AertsShape.compute(ivMask, iv.pixelDimensions, results);
+					radiomics.AertsTexture.compute(iv.data, ivMask, results);
+
+					% Wavelet decompositions
+					this.processWavelet(iv.data, ivMask, results);
+
+					this.outputResults(rtStruct, results, iaItem, markup);
 				catch ex
-					this.logWarn(['Processing RtRoi failed: ',ex.message]);
+					this.logWarn(...
+						@() sprintf('ERROR: Processing RtRoi failed: %s - %s', ...
+							roi.name, ex.message));
+					this.logWarn(...
+						@() sprintf('ERROR in IAC UID: %s', iaItem.iac.uniqueIdentifier));
 					continue;
 				end
 
-				% Native pixels
-				results = containers.Map('KeyType', 'char', 'ValueType', 'any');
-				radiomics.AertsStatistics.compute(iv.data, ivMask, results);
-				radiomics.AertsShape.compute(ivMask, iv.pixelDimensions, results);
-				radiomics.AertsTexture.compute(iv.data, ivMask, results);
-
-				% Wavelet decompositions
-				this.processWavelet(iv.data, ivMask, results);
-
-				this.outputResults(rtStruct, results, ia, markup);
 			end
 		end
 
@@ -670,37 +818,71 @@ classdef MainUi < ether.app.AbstractGuiApplication
 		end
 
 		%-------------------------------------------------------------------------
-		function logDebug(this, msg)
-			this.logger.debug(msg);
-			this.logUi(msg);
-		end
-
-		%-------------------------------------------------------------------------
-		function logInfo(this, msg)
-			this.logger.info(msg);
-			this.logUi(msg);
-		end
-
-		%-------------------------------------------------------------------------
-		function logWarn(this, msg)
-			this.logger.warn(msg);
-			this.logUi(msg);
-		end
-
-		%-------------------------------------------------------------------------
-		function logUi(this, msg)
-			if ~ischar(msg)
-				msg = msg();
+		function saveFusedIac(this, iac)
+			import radiomics.*;
+			iacDir = this.options.targetPath;
+			if (exist(iacDir, 'dir') == 0)
+				mkdir(iacDir);
 			end
-			this.outputLog = {this.outputLog{:},msg};
-			this.nLogLines = this.nLogLines+numel(strsplit(msg, '\n'));
-			% Force the outputText's underlying Java object to be multiline.
-			% MATLAB changes the Java object depending if single or multiline.
-			this.outputText.Max = max(this.nLogLines, 2);
-			this.outputText.Value = this.nLogLines;
-			this.outputText.String = this.outputLog;
+			iaArr = iac.getAllAnnotations();
+			iaName = iaArr(1).name;
+			iacUid = iac.uniqueIdentifier;
+			fileName = [iacDir,iaName,'_',iacUid,'.xml'];
+			this.logInfo(['Writing IAC to: ',fileName]);
+			jIac = iac.getJavaIac();
+			jWriter = etherj.aim.DefaultXmlWriter();
+			try
+				jWriter.write(jIac, fileName);
+			catch ex
+				this.logWarn(@() sprintf('Error writing IAC: %s', ex.message));
+			end
+		end
+
+		%-------------------------------------------------------------------------
+		function saveOptions(this)
+			optionsFile = [this.productDir,this.productTag,'_options.xml'];
+			io = radiomics.OptionsIo();
+			io.write(this.options, optionsFile);
+		end
+
+		%-------------------------------------------------------------------------
+		function selectTargetPath(this)
+			path = uigetdir(this.options.targetPath, 'Select results directory');
+			if isempty(path)
+				return;
+			end
+			this.options.targetPath = [path,filesep()];
+			this.dirText.String = this.options.targetPath;
+			this.logInfo(@() ['Results directory set to: ',this.options.targetPath]);
+			this.saveOptions();
 			drawnow();
-			this.jOutputText.setCaretPosition(this.jOutputText.getDocument().getLength());
+		end
+
+		%-------------------------------------------------------------------------
+		function items = sortIaItemsArray(~, items)
+			% Sort into name order
+			names = arrayfun(@(item) item.personName, items, 'UniformOutput', ...
+				false);
+			dateTimes = arrayfun(@(item) item.ia.dateTime, items, ...
+				'UniformOutput', false);
+			[names,idx] = sort(names);
+			dateTimes = dateTimes(idx);
+			items = items(idx);
+			% Convert dateTimes to uint64
+			dates = cellfun(@(dt) etherj.aim.AimUtils.parseDateTime(dt), ...
+				dateTimes, 'UniformOutput', false);
+			dateTimes = cellfun(@(dt) dt.getTime(), dates);
+			% Sort each name clump by dateTime
+			uniqueNames = unique(names);
+			startIdx = 1;
+			for i=1:numel(uniqueNames)
+				nameIdx = strcmp(names, uniqueNames{i});
+				[~,dtIdx] = sort(dateTimes(nameIdx));
+				nCurrItems = numel(dtIdx);
+				currItems = items(startIdx:startIdx+nCurrItems-1);
+				items(startIdx:startIdx+nCurrItems-1) = currItems(dtIdx);
+				startIdx = startIdx+nCurrItems;
+			end
 		end
 
 	end

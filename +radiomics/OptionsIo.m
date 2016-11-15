@@ -10,6 +10,7 @@ classdef OptionsIo < handle
 	properties(Constant,Access=private)
 		ATTR_ID = 'id';
 		ATTR_PATH = 'path';
+		NODE_LOCAL_IMPORT_PATH = 'localImportPath';
 		NODE_OPTIONS = 'radiomicsOptions';
 		NODE_PATH = 'path';
 		NODE_PROJECT = 'project';
@@ -66,6 +67,10 @@ classdef OptionsIo < handle
 
 					case OptionsIo.NODE_TARGET_PATH
 						options.targetPath = Xml.getAttrStr(node.getAttributes(), ...
+							OptionsIo.ATTR_PATH);
+
+					case OptionsIo.NODE_LOCAL_IMPORT_PATH
+						options.localImportPath = Xml.getAttrStr(node.getAttributes(), ...
 							OptionsIo.ATTR_PATH);
 
 					otherwise
@@ -126,6 +131,8 @@ classdef OptionsIo < handle
 		function writeDoc(~, fileId, options)
 			fprintf(fileId, '<radiomicsOptions>\n');
 			fprintf(fileId, '	<path>\n');
+			fprintf(fileId, '		<localImportPath path="%s" />\n', ...
+				options.localImportPath);
 			fprintf(fileId, '		<targetPath path="%s" />\n', options.targetPath);
 			fprintf(fileId, '	</path>\n');
 			fprintf(fileId, '	<xnat>\n');
@@ -139,7 +146,11 @@ classdef OptionsIo < handle
 			fprintf(fileId, '<?xml version="1.0" encoding="UTF-8"?>\n\n');
 			fprintf(fileId, '<!DOCTYPE radiomicsOptions [\n');
 			fprintf(fileId, '	<!ELEMENT radiomicsOptions (path,xnat)>\n');
-			fprintf(fileId, '	<!ELEMENT path (targetPath)>\n');
+			fprintf(fileId, '	<!ELEMENT path (localImportPath,targetPath)>\n');
+			fprintf(fileId, '	<!ELEMENT localImportPath EMPTY>\n');
+			fprintf(fileId, '	<!ATTLIST localImportPath\n');
+			fprintf(fileId, '		path CDATA #REQUIRED\n');
+			fprintf(fileId, '	>\n');
 			fprintf(fileId, '	<!ELEMENT targetPath EMPTY>\n');
 			fprintf(fileId, '	<!ATTLIST targetPath\n');
 			fprintf(fileId, '		path CDATA #REQUIRED\n');

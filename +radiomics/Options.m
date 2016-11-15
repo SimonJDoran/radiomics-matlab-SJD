@@ -3,6 +3,7 @@ classdef Options < handle
 	%   Detailed explanation goes here
 	
 	properties
+		localImportPath = '';
 		targetPath = '';
 		projectId = '';
 	end
