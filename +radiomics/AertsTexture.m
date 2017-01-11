@@ -1,6 +1,6 @@
 classdef AertsTexture
 	%AERTSTEXTURE Summary of this class goes here
-	%   Decoding tumour phenotype by noninvasive imaging using a quantitative
+	% Decoding tumour phenotype by noninvasive imaging using a quantitative
 	% radiomics approach. Aerts et al. Nature Communications 2014
 	% DOI: 10.1038/ncomms5006
 
@@ -50,46 +50,67 @@ classdef AertsTexture
 	%----------------------------------------------------------------------------
 	methods(Static)
 		%-------------------------------------------------------------------------
-		function collector = compute(inImage3D, mask3D, collector)
+		function [collector,bins] = compute(inImage3D, mask3D, collector, dimFlag, bins)
 			import radiomics.*;
-			% Number of discrete grey levels
-			nG = 8;
-			image3D = AertsTexture.discretise(inImage3D, mask3D, nG);
-			AertsTexture.glcmMetrics(image3D, mask3D, nG, collector);
+
+			% default to 3D processing
+			if nargin<4 || isempty(dimFlag)
+				dimFlag = '3D';
+			end
+
+			% default number of discrete grey levels
+			if nargin<5
+				bins = 8;
+			end
+
+			sz = size(inImage3D);
+			if length(sz)==2
+				% pad in z-direction to make array 3D
+				zzd = zeros(size(inImage3D));
+				zzb = false(size(inImage3D));
+				inImage3D = cat(3, zzd, inImage3D, zzd);
+				mask3D = cat(3, zzb, mask3D, zzb);
+				sz = size(inImage3D);
+				dimFlag = '2D';
+			end
+
+			[image3D,bins] = AertsTexture.discretise(inImage3D, mask3D, bins);
+			AertsTexture.glcmMetrics(image3D, mask3D, length(bins)-1, collector, dimFlag);
 			% Max run length is largest array dimension
-			sz = size(image3D);
 			nR = max(sz);
-			AertsTexture.glrlmMetrics(image3D, mask3D, nG, nR, collector);
+			AertsTexture.glrlmMetrics(image3D, mask3D, length(bins)-1, nR, collector, dimFlag);
 		end
 
 		%-------------------------------------------------------------------------
-		function result = discretise(image3D, mask3D, nG)
-			idx = find(mask3D == 1);
-			pixels = image3D(idx);
-			imageMin = min(pixels(:));
-			imageMax = max(pixels(:));
-			range = imageMax-imageMin;
+		function [result,bins] = discretise(image3D, mask3D, bins)
 			result = zeros(size(image3D));
-			result(idx)= 1+ceil((nG-1)*((pixels-imageMin)/range));
+			% Note: discretize is a built-in function.
+			% Result of this approach NOT identical to previous code as bin
+			% edges will be different (even though bin number is the same).
+			if isscalar(bins)
+				[result(mask3D),bins] = discretize(image3D(mask3D), bins);
+				% bins is now an array of bin edges
+			else
+				result(mask3D) = discretize(image3D(mask3D), bins);
+			end
 		end
 
 		%-------------------------------------------------------------------------
-		function [result,nDir] = glcm3D(image3D, mask3D, nG, fNormalise)
+		function [result,nDir] = glcm3D(image3D, mask3D, nBins, dimFlag, fNormalise)
 			import radiomics.*;
-			if nargin < 4
+			if nargin < 5
 				fNormalise = true;
 			end
-			[directions,nDir] = AertsTexture.directions3D();
-			result = zeros(nDir, nG, nG);
+			[directions,nDir] = AertsTexture.directions3D(dimFlag);
+			result = zeros(nDir, nBins, nBins);
 			% Linear subscripts of voxels in ROI
 			idx = find(mask3D == 1);
 			sz = size(image3D);
-			nY = sz(1);
-			nX = sz(2);
-			nZ = sz(3);
 			maskedImage = image3D.*mask3D;
+			% Precompute for speed
+			maskedVoxels = maskedImage(idx);
 			for k=1:nDir
-				p = zeros(nG, nG);
+				p = zeros(nBins, nBins);
 				% Compute linear subscripts of the voxels in the current direction
 				% from voxels in ROI
 				currDir = squeeze(directions(k,:));
@@ -97,24 +118,18 @@ classdef AertsTexture
 				dirY = dirY+currDir(1);
 				dirX = dirX+currDir(2);
 				dirZ = dirZ+currDir(3);
-				% Include only voxels which are actually inside the volume
-				validIdx = (dirY > 0) & (dirY <= nY) & ...
-					(dirX > 0) & (dirX <= nX) & ...
-					(dirZ > 0) & (dirZ <= nZ);
-				dirY = dirY(validIdx);
-				dirX = dirX(validIdx);
-				dirZ = dirZ(validIdx);
-				if (any(validIdx))
-					dirIdx = sub2ind(sz, dirY, dirX, dirZ);
-					filteredIdx = idx(validIdx);
-					% GLCM for current direction
-					for i=1:nG
-						for j=1:nG
-							p(i,j) = ...
-								nnz((maskedImage(filteredIdx) == i) & (maskedImage(dirIdx) == j));
-						end
-					end
-				end
+				dirIdx = sub2ind(sz, dirY, dirX, dirZ);
+				maskedVoxelsCurrDir = maskedImage(dirIdx);
+				% GLCM for current direction
+				% Equivalent to:
+				% for i=1:nBins
+				%    for j=1:nBins
+				%       p(i,j) = ...
+				%          nnz((maskedVoxels == i) & (maskedVoxelsCurrDir == j));
+				%    end
+				% end
+				p = histcounts2(maskedVoxels, maskedVoxelsCurrDir, ...
+					0.5:1:(nBins+0.5), 0.5:1:(nBins+0.5));
 				% Normalise
 				if fNormalise
 					sumP = sum(p(:));
@@ -128,33 +143,42 @@ classdef AertsTexture
 		end
 
 		%-------------------------------------------------------------------------
-		function [result,nDir] = glrlm3D(image3D, mask3D, nG, nR)
+		function [result,nDir] = glrlm3D(image3D, mask3D, nG, nR, dimFlag)
 			import radiomics.*;
-			[directions,nDir] = AertsTexture.directions3D();
+			[directions,nDir] = AertsTexture.directions3D(dimFlag);
 			result = zeros(nDir, nG, nR);
 			maskedImage = image3D.*mask3D;
 			% Find the pixels matching each grey level
 			maskedIdx = find(maskedImage ~= 0);
 			glIdx = cell(nG, 1);
 			for i=1:nG
-				idx = find(maskedImage(maskedIdx) == i);
-				glIdx{i} = maskedIdx(idx);
+				glIdx{i} = maskedIdx(maskedImage(maskedIdx) == i);
 			end
 			for k=1:nDir
 				p = zeros(nG, nR);
 				currDir = squeeze(directions(k,:));
 				for i=1:nG
 					idx = glIdx{i};
-					nPixels = numel(idx);
-					for j=1:nPixels
-						% Pixel must be a start of a run.
-						if (~AertsTexture.isRunStart(maskedImage, idx(j), currDir))
-							continue;
-						end
-						runLength = AertsTexture.findRunLength(maskedImage, idx(j), ...
-							currDir, nR);
-						p(i,runLength) = p(i,runLength)+1;
+					if isempty(idx)
+						continue
 					end
+					runStartFlag = AertsTexture.isRunStart(maskedImage, idx, currDir);
+					runLength = AertsTexture.findRunLengthArr(maskedImage, ...
+						idx(runStartFlag), currDir, nR);
+					[runLengthCounts,edges] = histcounts(runLength, 'BinMethod', ...
+						'integers');
+					jdx = round(edges(1:end-1)+0.5);
+					p(i,jdx) = runLengthCounts;
+					% Equivalent to:
+					% for j=1:nPixels
+					%    % Pixel must be a start of a run.
+					%    if (~AertsTexture.isRunStart(maskedImage, idx(j), currDir))
+					%       continue;
+					%    end
+					%    runLength = AertsTexture.findRunLength(maskedImage, idx(j), ...
+					%       currDir, nR);
+					%    p(i,runLength) = p(i,runLength)+1;
+					% end
 				end
 				result(k,:,:) = p;
 			end
@@ -238,27 +262,40 @@ classdef AertsTexture
 		end
 
 		%-------------------------------------------------------------------------
-		function [directions,nDir] = directions3D()
+		function [directions,nDir] = directions3D(dimFlag)
 			% Compute the (dY,dX,dZ) vectors for each direction from chosen pixel
 			% Directions that are opposite of another direction are omitted.
-			nDir = 13;
-			directions = zeros(nDir, 3);
-			% Square above is -1z
-			directions(1:9,3) = -1;
-			% First row of square above are +1y
-			directions(1:3,1) = 1;
-			% Third row of square above are -1y
-			directions(7:9,1) = -1;
-			% First column of square above are -1x
-			directions(1:3:9,2) = -1;
-			% Third column of square above are +1x
-			directions(3:3:9,2) = 1;
-			% First row of square around are +1y
-			directions(10:12,1) = 1;
-			% First column of square above are -1x
-			directions(10,2) = -1;
-			% Third column of square around are +1x
-			directions(12:13,2) = 1;
+			switch dimFlag
+				case '2D'
+					nDir = 4;
+					directions = zeros(nDir, 3);
+					% First row of square around are +1y
+					directions(1:3,1) = 1;
+					% First column of square above are -1x
+					directions(1,2) = -1;
+					% Third column of square around are +1x
+					directions(3:4,2) = 1;
+				case '3D'
+					nDir = 13;
+					directions = zeros(nDir, 3);
+					% Square above is -1z
+					directions(1:9,3) = -1;
+					% First row of square above are +1y
+					directions(1:3,1) = 1;
+					% Third row of square above are -1y
+					directions(7:9,1) = -1;
+					% First column of square above are -1x
+					directions(1:3:9,2) = -1;
+					% Third column of square above are +1x
+					directions(3:3:9,2) = 1;
+					% First row of square around are +1y
+					directions(10:12,1) = 1;
+					% First column of square above are -1x
+					directions(10,2) = -1;
+					% Third column of square around are +1x
+					directions(12:13,2) = 1;
+				otherwise
+			end
 		end
 
 		%-------------------------------------------------------------------------
@@ -286,11 +323,11 @@ classdef AertsTexture
 		end
 
 		%-------------------------------------------------------------------------
-		function length = findRunLength(image3D, idx, dir, nR)
+		function runLength = findRunLength(image3D, idx, dir, nR)
 			import radiomics.*;
 			sz = size(image3D);
 			[y,x,z] = ind2sub(sz, idx);
-			length = 1;
+			runLength = 1;
 			for i=1:nR-1
 				dirY = y+i*dir(1);
 				dirX = x+i*dir(2);
@@ -300,14 +337,35 @@ classdef AertsTexture
 				if ~fValid || (image3D(dirY,dirX,dirZ) ~= image3D(idx))
 					break
 				end
-				length = length+1;
+				runLength = runLength+1;
 			end
 		end
 
 		%-------------------------------------------------------------------------
-		function collector = glcmMetrics(image3D, mask3D, nG, collector)
+		function runLength = findRunLengthArr(image3D, idx, dir, nR)
 			import radiomics.*;
-			[glcmAll,nDir] = AertsTexture.glcm3D(image3D, mask3D, nG);
+			sz = size(image3D);
+			[y,x,z] = ind2sub(sz, idx);
+			runLength = ones(size(idx));
+			fActive = true(size(idx));
+			for i=1:nR-1
+				dirY = y(fActive)+i*dir(1);
+				dirX = x(fActive)+i*dir(2);
+				dirZ = z(fActive)+i*dir(3);
+				fActive(fActive) = AertsTexture.isValidIdx(dirY, dirX, dirZ, ...
+					sz(1), sz(2), sz(3)) & ...
+					(image3D(sub2ind(sz,dirY,dirX,dirZ)) == image3D(idx(fActive)));
+				if ~any(fActive)
+					break
+				end
+				runLength(fActive) = runLength(fActive)+1;
+			end
+		end
+
+		%-------------------------------------------------------------------------
+		function collector = glcmMetrics(image3D, mask3D, nG, collector, dimFlag)
+			import radiomics.*;
+			[glcmAll,nDir] = AertsTexture.glcm3D(image3D, mask3D, nG, dimFlag);
 			% Precompute reused quantities according to Aerts 2014
 			mu = zeros(nDir, 1);
 			pX = zeros(nDir, nG);
@@ -412,7 +470,7 @@ classdef AertsTexture
 			collector(AertsTexture.InverseDifferenceMomentNormalised) = ...
 				mean(idmn(valid));
 			collector(AertsTexture.InverseDifferenceNormalised) = mean(idn(valid));
-			collector(AertsTexture.InverseVariance) = mean(inverseVar);
+			collector(AertsTexture.InverseVariance) = mean(inverseVar(valid));
 			collector(AertsTexture.MaximumProbability) = mean(maxP(valid));
 			collector(AertsTexture.SumAverage) = mean(sumAverage(valid));
 			collector(AertsTexture.SumEntropy) = mean(sumEntropy(valid));
@@ -421,9 +479,9 @@ classdef AertsTexture
 		end
 
 		%-------------------------------------------------------------------------
-		function collector = glrlmMetrics(image3D, mask3D, nG, nR, collector)
+		function collector = glrlmMetrics(image3D, mask3D, nG, nR, collector, dimFlag)
 			import radiomics.*;
-			[glrlmAll,nDir] = AertsTexture.glrlm3D(image3D, mask3D, nG, nR);
+			[glrlmAll,nDir] = AertsTexture.glrlm3D(image3D, mask3D, nG, nR, dimFlag);
 			% Precompute reused quantities according to Aerts 2014
 			nP = nnz(mask3D);
 			sumP = zeros(nDir, 1);
@@ -551,9 +609,11 @@ classdef AertsTexture
 			dirX = x-dir(2);
 			dirZ = z-dir(3);
 			bool = AertsTexture.isValidIdx(dirY, dirX, dirZ, sz(1), sz(2), sz(3));
-			if bool
-				bool = image3D(dirY,dirX,dirZ) ~= image3D(idx);
-			end
+			% edit to enable this function to work when idx is a 1D array
+			bool = bool & (image3D(sub2ind(sz,dirY,dirX,dirZ)) ~= image3D(idx));
+			%if bool
+			%   bool = image3D(dirY,dirX,dirZ) ~= image3D(idx);
+			%end
 		end
 
 		%-------------------------------------------------------------------------
@@ -732,6 +792,7 @@ classdef AertsTexture
 				iSq = i.^2;
 				for j=1:nR
 					result = result+(p(i,j).*iSq./(j.^2));
+					T(i,j) = iSq/j^2;
 				end
 			end
 			result = result/denom;
