@@ -301,7 +301,7 @@ classdef MainUi < ether.app.AbstractGuiApplication
 		end
 
 		%-------------------------------------------------------------------------
-		function onEditKeyRelease(this, source, event)
+		function onEditKeyRelease(this, ~, event)
 			if (~strcmp(event.Key, 'return'))
 				return
 			end
@@ -405,50 +405,13 @@ classdef MainUi < ether.app.AbstractGuiApplication
 				end
 			end
 			this.logInfo(@() sprintf('Processing %d ROIs...', nRows));
-			this.logInfo(@() sprintf('Fetching RT-STRUCTs'));
-			rtStructList = ether.collect.CellArrayList('ether.dicom.RtStruct');
-			iaItemList = ether.collect.CellArrayList('radiomics.IaItem');
-			markupList = ether.collect.CellArrayList('ether.aim.Markup');
-			for i=1:nRows
-				iaItem = iaItems(rowIdx(i));
-				iaItemList.add(iaItem);
-				% Only deal with one markup per annotation for now
-				markups = iaItem.ia.getAllMarkups;
-				if (isempty(markups))
-					this.logWarn(@() sprintf(...
-						'ImageAnnotation contains no Markups. Patient %s', ...
-						iaItem.personName));
-					continue;
-				end
-				rtStruct = this.dataSource.getRtStructForMarkup(...
-					this.options.projectId, markups(1).uniqueIdentifier);
-				if isempty(rtStruct)
-					this.logWarn(@() sprintf(...
-						'No RT-STRUCT found for Patient %s, Markup UID: %s, Lesion: %s, IAC UID: %s', ...
-						iaItem.personName, markups(1).uniqueIdentifier, iaItem.ia.name, iaItem.iac.uniqueIdentifier));
-					continue;
-				end
-				rtStructList.add(rtStruct);
-				markupList.add(markups(1));
-			end
-			if rtStructList.isEmpty()
-				message = sprintf('No RT-STRUCTs found');
-				this.logWarn(message);
-				this.frame.Pointer = 'arrow';
-				msgbox(message, 'Process', 'warn', 'modal');
-				return;
-			end
-			this.buildRefSeriesMap(rtStructList);
-			for i=1:rtStructList.size()
-				rtStruct = rtStructList.get(i);
-				this.logInfo(@() sprintf('Processing RT-STRUCT (%d of %d)', ...
-					i, rtStructList.size()));
-				iaItem = iaItemList.get(i);
-				markup = markupList.get(i);
-				this.processRtStruct(rtStruct, iaItem, markup);
-			end
-			this.logInfo(@() sprintf('Processing RT-STRUCTs complete'));
+			analyser = radiomics.TextureAnalyser3D();
+			resultList = analyser.analyse(iaItems(rowIdx), this.dataSource, ...
+				this.options.projectId);
+			this.saveResults(resultList);
 			this.frame.Pointer = 'arrow';
+			this.logInfo(@() sprintf('Processing RT-STRUCTs complete'));
+			return;
 		end
 
 		%-------------------------------------------------------------------------
@@ -505,132 +468,6 @@ classdef MainUi < ether.app.AbstractGuiApplication
 		end
 
 		%-------------------------------------------------------------------------
-		function buildRefSeriesMap(this, rtStructList)
-			import radiomics.*;
-			this.refSeriesMap = containers.Map('KeyType', 'char', ...
-				'ValueType', 'any');
-			this.seriesVolumeMap = containers.Map('KeyType', 'char', ...
-				'ValueType', 'any');
-			this.instSeriesMap = containers.Map('KeyType', 'char', ...
-				'ValueType', 'any');
-			this.logInfo(@() sprintf('Fetching referenced series'));
-			nRtStruct = rtStructList.size();
-			for i=1:nRtStruct
-				rtStruct = rtStructList.get(i);
-				refSeriesUidList = rtStruct.getReferencedSeriesUidList();
-				for j=1:refSeriesUidList.size()
-					refSeriesUid = refSeriesUidList.get(j);
-					if this.refSeriesMap.isKey(refSeriesUid)
-						continue;
-					end
-					series = this.dataSource.getImageSeries(this.options.projectId, ...
-						refSeriesUid, DataSource.Series);
-					if ~isempty(series)
-						this.insertSeries(series);
-						this.logInfo(@() sprintf('Series: %d - %s (%s)', series.number, ...
-							series.description, series.instanceUid));
-					else
-						this.logInfo(@() sprintf('Series not found: UID - %s', ...
-							refSeriesUid));
-					end
-				end
-			end
-			this.logInfo(@() sprintf('%d referenced series loaded', ...
-				this.refSeriesMap.length()));
-		end
-
-		%-------------------------------------------------------------------------
-		function iv = createImageVolume(this, roi)
-			iv = [];
-			roiImageRefs = roi.getImageReferenceList();
-			if ~this.loadImageReferences(roiImageRefs)
-				return;
-			end
-			seriesUid = this.instSeriesMap(roiImageRefs.get(1).sopInstanceUid);
-			iv = this.seriesVolumeMap(seriesUid);
-		end
-
-		%-------------------------------------------------------------------------
-		function ivMask = createVolumeMask(this, iv, roi)
-			if isempty(iv)
-				throw(MException('Radiomics:MainUi', ...
-					'ImageVolume not found'));
-			end
-			[nY,nX,nZ] = size(iv.data);
-			ivMask = zeros(nY, nX, nZ);
-			contourList = roi.getContourList();
-			for n=1:contourList.size()
-				contour = contourList.get(n);
-				% Assume only ever be one image referenced in a contour.
-				contourRef = contour.getImageReferenceList().toArray();
-				% Assume single frame images
-				ivIdx = find(cellfun(@(c) strcmp(c, contourRef.sopInstanceUid), ...
-					iv.sopInstUids));
-				points = contour.getContourPointsList();
-				% Points must be image (x,y) coordinates not patient (x,y,z)
-				% coordinates
-				image = iv.images(ivIdx);
- 				pos = image.imagePosition;
-				row = image.imageOrientation(4:6);
-				col = image.imageOrientation(1:3);
-				pixDims = image.pixelSpacing;
-				points2D = points(:,1:2);
-				for i=1:contour.numberOfContourPoints
-					points2D(i,1:2) = etherj.dicom.DicomUtils.patientCoordToImageCoord(...
-						points(i,:), pos, row, col, pixDims);
-				end
-				mask = poly2mask(points2D(:,1), points2D(:,2), nY, nX);
-				if ~any(mask)
-					throw(MException('Radiomics:MainUi', ...
-						'Contour encloses zero pixels'));
-				end
-				ivMask(:,:,ivIdx) = mask;
-			end
-		end
-
-		%-------------------------------------------------------------------------
-		function seriesUid = getReferencedSeriesUid(this, roi)
-			seriesUid = [];
-			roiImageRefs = roi.getImageReferenceList();
-			if ~this.loadImageReferences(roiImageRefs)
-				return;
-			end
-			seriesUid = this.instSeriesMap(roiImageRefs.get(1).sopInstanceUid);
-		end
-
-		%-------------------------------------------------------------------------
-		function insertSeries(this, series)
-			if (isempty(series))
-				return;
-			end
-			this.refSeriesMap(series.instanceUid) = series;
-			instList = series.getSopInstanceList();
-			for i=1:instList.size()
-				inst = instList.get(i);
-				this.instSeriesMap(inst.instanceUid) = series.instanceUid;
-			end
-			this.seriesVolumeMap(series.instanceUid) = radiomics.ImageVolume(series);
-			this.logger.info(@() sprintf('Series loaded: %s', ...
-				series.instanceUid));
-		end
-
-		%-------------------------------------------------------------------------
-		function bool = loadImageReferences(this, imageRefs)
-			import radiomics.*;
-			bool = false;
-			for i=1:imageRefs.size()
-				ref = imageRefs.get(i);
-				if ~this.instSeriesMap.isKey(ref.sopInstanceUid)
-					return;
-				end
-% 				series = this.dataSource.getImageSeries(ref.sopInstanceUid, ...
-% 					DataSource.Instance);
-% 				this.insertSeries(series);
-			end
-			bool = true;
-		end
-
-		%-------------------------------------------------------------------------
 		function logDebug(this, msg)
 			this.logger.debug(msg);
 			this.logUi(msg);
@@ -668,9 +505,17 @@ classdef MainUi < ether.app.AbstractGuiApplication
 		end
 
 		%-------------------------------------------------------------------------
-		function outputResults(this, rtStruct, results, iaItem, markup)
+		function outputResults(this, results, iaItem)
 			import radiomics.*;
-			patDir = [this.options.targetPath,rtStruct.patientName,filesep()];
+			iac = iaItem.iac;
+			patientName = iac.person.name;
+			if isempty(patientName)
+				patientName = iac.person.id;
+			end
+			if isempty(patientName)
+				patientName = iac.uniqueIdentifier;
+			end
+			patDir = [this.options.targetPath,patientName,filesep()];
 			if (exist(patDir, 'dir') == 0)
 				mkdir(patDir);
 			end
@@ -680,25 +525,26 @@ classdef MainUi < ether.app.AbstractGuiApplication
 					lesionStr = sprintf('%s-%03i-%s-%03i', iaItem.personName, ...
 						iaItem.lesionNumber, iaItem.scan, iaItem.roiNumber);
 				else
-					lesionStr = iaItem.scan;
+					lesionStr = strjoin(strsplit(erase(iaItem.scan, '.'), ' '), '_');
 				end
 			end
 			ia = iaItem.ia;
 			dt = strjoin(strsplit(ia.dateTime, ':'), '-');
 			fileName = [patDir,'AertsResults'];
+			desc = strjoin(strsplit(iac.description, ' '), '_');
+			if ~isempty(desc)
+				fileName = [fileName,'_',desc];
+			end
 			if ~isempty(lesionStr)
 				fileName = [fileName,'_',lesionStr];
 			end
-			fileName = [fileName,'_',dt,'_',markup.uniqueIdentifier,'.txt'];
+			fileName = [fileName,'_',dt,'_',ia.uniqueIdentifier,'.txt'];
 			this.logInfo(['Writing results to: ',fileName]);
 			fileId = fopen(fileName, 'w');
-			fprintf(fileId, 'PatientName: %s\n', rtStruct.patientName);
+			fprintf(fileId, 'PatientName: %s\n', patientName);
+			fprintf(fileId, 'AnnotationCollectionDescription: %s\n', iac.description);
 			fprintf(fileId, 'AnnotationName: %s\n', ia.name);
-			fprintf(fileId, 'LesionName: %s\n', rtStruct.name);
-			if ~isempty(lesionStr)
-				fprintf(fileId, 'LesionId: %s\n', lesionStr);
-			end
-			fprintf(fileId, 'MarkupUid: %s\n', markup.uniqueIdentifier);
+			fprintf(fileId, 'AnnotationUid: %s\n', ia.uniqueIdentifier);
 			metrics = Aerts.getMetrics();
 			prefix = {'', 'LLL.', 'LLH.', 'LHL.', 'LHH.', 'HLL.', 'HLH.', 'HHL.', 'HHH.'};
 			for j=1:numel(prefix)
@@ -711,110 +557,6 @@ classdef MainUi < ether.app.AbstractGuiApplication
 				end
 			end
 			fclose(fileId);
-		end
-
-		%-------------------------------------------------------------------------
-		function decompResults = processDecomp(~, decomp, mask, prefix)
-			results = containers.Map('KeyType', 'char', 'ValueType', 'any');
-			% First-order stats
-			radiomics.AertsStatistics.compute(decomp, mask, results);
-			% Texture
-			radiomics.AertsTexture.compute(decomp, mask, results);
-			% Pack them with the prefix
-			decompResults = containers.Map('KeyType', 'char', 'ValueType', 'any');
-			keys = results.keys();
-			for i=1:numel(keys)
-				decompResults([prefix,'.',keys{i}]) = results(keys{i});
-			end
-		end
-
-		%-------------------------------------------------------------------------
-		function [rtStructList,iaItemList,markupList] = processIaItems(this, ...
-			iaItems, rowIdx)
-
-			this.logInfo(@() sprintf('Fetching RT-STRUCTs'));
-			rtStructList = ether.collect.CellArrayList('ether.dicom.RtStruct');
-			iaItemList = ether.collect.CellArrayList('radiomics.IaItem');
-			markupList = ether.collect.CellArrayList('ether.aim.Markup');
-			nRows = numel(rowIdx);
-			for i=1:nRows
-				iaItem = iaItems(rowIdx(i));
-				markups = iaItem.ia.getAllMarkups;
-				nMarkups = numel(markups);
-				if (nMarkups > 1)
-					this.logInfo(@() sprintf('NB: %i markups in annotation!', ...
-						nMarkups));
-				end
-				for j=1:nMarkups
-					rtStruct = this.dataSource.getRtStructForMarkup(...
-						this.options.projectId, markups(j).uniqueIdentifier);
-					if isempty(rtStruct)
-						this.logWarn(@() sprintf(...
-							'No RT-STRUCT found for Patient %s, Markup UID: %s', ...
-							iaItem.personName, markups(1).uniqueIdentifier));
-						continue;
-					end
-					iaItemList.add(iaItem);
-					rtStructList.add(rtStruct);
-					markupList.add(markups(j));
-				end
-			end
-		end
-
-		%-------------------------------------------------------------------------
-		function processRtStruct(this, rtStruct, iaItem, markup)
-			this.logInfo(@() sprintf('Processing Patient %s, RT-STRUCT: %s', ...
-				rtStruct.patientName, rtStruct.name));
-			roiList = rtStruct.getRoiList();
-			nRoi = roiList.size();
-			for m=1:nRoi
-				roi = roiList.get(m);
-				this.logInfo(@() sprintf('Processing RtRoi: %s (%d of %d)', ...
-					roi.name, m, nRoi));
-				iv = this.createImageVolume(roi);
-				try
-					ivMask = this.createVolumeMask(iv, roi);
-					% Native pixels
-					results = containers.Map('KeyType', 'char', 'ValueType', 'any');
-					radiomics.AertsStatistics.compute(iv.data, ivMask, results);
-					radiomics.AertsShape.compute(ivMask, iv.pixelDimensions, results);
-					radiomics.AertsTexture.compute(iv.data, ivMask, results);
-
-					% Wavelet decompositions
-					this.processWavelet(iv.data, ivMask, results);
-
-					this.outputResults(rtStruct, results, iaItem, markup);
-				catch ex
-					this.logWarn(...
-						@() sprintf('ERROR: Processing RtRoi failed: %s - %s', ...
-							roi.name, ex.message));
-					this.logWarn(...
-						@() sprintf('ERROR in IAC UID: %s', iaItem.iac.uniqueIdentifier));
-					continue;
-				end
-
-			end
-		end
-
-		%-------------------------------------------------------------------------
-		function results = processWavelet(this, data, mask, results)
-			transform = radiomics.Wavelet.dwt3u(data, 'coif1', 'mode', 'zpd');
-			dirString = {'L','H'};
-			for i=1:2
-				for j=1:2
-					for k=1:2
-						prefix = [dirString{i},dirString{j},dirString{k}];
-						this.logInfo(...
-							@() sprintf('Processing wavelet decomposition: %s', prefix));
-						dirResults = this.processDecomp(transform.dec{i,j,k}, ...
-							mask, prefix);
-						dirKeys = dirResults.keys();
-						for m=1:numel(dirKeys)
-							results(dirKeys{m}) = dirResults(dirKeys{m});
-						end
-					end
-				end
-			end
 		end
 
 		%-------------------------------------------------------------------------
@@ -843,6 +585,14 @@ classdef MainUi < ether.app.AbstractGuiApplication
 			optionsFile = [this.productDir,this.productTag,'_options.xml'];
 			io = radiomics.OptionsIo();
 			io.write(this.options, optionsFile);
+		end
+
+		%-------------------------------------------------------------------------
+		function saveResults(this, resultList)
+			for i=1:resultList.size()
+				result = resultList.get(i);
+				this.outputResults(result.results, result.iaItem)
+			end
 		end
 
 		%-------------------------------------------------------------------------

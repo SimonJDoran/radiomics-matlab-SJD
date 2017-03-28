@@ -792,7 +792,7 @@ classdef AertsTexture
 				iSq = i.^2;
 				for j=1:nR
 					result = result+(p(i,j).*iSq./(j.^2));
-					T(i,j) = iSq/j^2;
+%					T(i,j) = iSq/j^2;
 				end
 			end
 			result = result/denom;

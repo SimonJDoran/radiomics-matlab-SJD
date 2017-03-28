@@ -67,8 +67,13 @@ classdef XnatDataSource < radiomics.DataSource
 					this.logger.warn('DataSource::getImageSeries(): Study-wide search not supported');
 
 				case DataSource.Series
-					jSeries = this.xds.getSeries(projectId, uid);
-					series = ether.dicom.Toolkit.getToolkit().createSeries(jSeries);
+					jSeriesMap = this.xds.getSeries(projectId, uid);
+					jSeries = jSeriesMap.values.iterator.next();
+					if ~isempty(jSeries)
+						series = ether.dicom.Toolkit.getToolkit().createSeries(jSeries);
+					else
+						this.logger.info(['DataSource::getImageSeries(): UID not found:',uid]);
+					end
 
 				case DataSource.Instance
 					this.logger.warn('DataSource::getImageSeries(): Instance search not supported');
