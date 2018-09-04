@@ -27,8 +27,8 @@ classdef DbDataSource < radiomics.DataSource
 		function this = DbDataSource(aimDb, dcmDb)
 			import ether.dicom.*;
 			this.etherDcmToolkit = Toolkit.getToolkit();
-			this.jDcmToolkit = etherj.dicom.DicomToolkit.getToolkit();
-			this.jAimToolkit = etherj.aim.AimToolkit.getToolkit();
+			this.jDcmToolkit = icr.etherj.dicom.DicomToolkit.getToolkit();
+			this.jAimToolkit = icr.etherj.aim.AimToolkit.getToolkit();
 			if (nargin ~= 2)
 				this.dcmDb = this.jDcmToolkit.createDicomDatabase();
 				this.aimDb = this.jAimToolkit.createAimDatabase();
@@ -121,7 +121,7 @@ classdef DbDataSource < radiomics.DataSource
 	methods(Access=private)
 		%-------------------------------------------------------------------------
 		function rtStructList = getAimRois(this, uid)
-			import etherj.aim.*;
+			import icr.etherj.aim.*;
 			import org.dcm4che2.data.*;
 			rtStructList = ether.collect.CellArrayList('ether.dicom.RtStruct');
 
@@ -138,7 +138,7 @@ classdef DbDataSource < radiomics.DataSource
 
 		%-------------------------------------------------------------------------
 		function rtStructList = getRtStructsForStudy(this, uid)
-			import etherj.dicom.*;
+			import icr.etherj.dicom.*;
 			import org.dcm4che2.data.*;
 			rtStructList = ether.collect.CellArrayList('ether.dicom.RtStruct');
 
@@ -165,7 +165,7 @@ classdef DbDataSource < radiomics.DataSource
 
 		%-------------------------------------------------------------------------
 		function series = getSeries(this, uid)
-			import etherj.dicom.*;
+			import icr.etherj.dicom.*;
 			import org.dcm4che2.data.*;
 			series = [];
 
@@ -201,7 +201,7 @@ classdef DbDataSource < radiomics.DataSource
 
 		%-------------------------------------------------------------------------
 		function series = getSeriesForInstance(this, uid)
-			import etherj.dicom.*;
+			import icr.etherj.dicom.*;
 			import org.dcm4che2.data.*;
 			series = [];
 

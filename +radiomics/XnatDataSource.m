@@ -17,11 +17,9 @@ classdef XnatDataSource < radiomics.DataSource
 	methods
 		%-------------------------------------------------------------------------
 		function this = XnatDataSource()
-			xnatToolkit = etherj.xnat.XnatToolkit.getToolkit();
+			xnatToolkit = icr.etherj.xnat.XnatToolkit.getToolkit();
 			this.conn = xnatToolkit.createServerConnection(...
-				'https://bifrost.icr.ac.uk:8443/XNAT_ROI', 'jamesd', 'Trl-50%');
-% 			this.conn = xnatToolkit.createServerConnection(...
-% 				'https://bifrost.icr.ac.uk:8443/XNAT_ROI', 'admin', 'XN@T_roi-2016');
+				'http://localhost:8015/XNAT_SIMOND', 'admin', 'admin');
 			this.conn.open();
 			this.xds = xnatToolkit.createDataSource(this.conn);
 		end
@@ -47,11 +45,14 @@ classdef XnatDataSource < radiomics.DataSource
 				'ether.aim.ImageAnnotationCollection');
 
 			if ((nargin == 3) && ischar(varargin{1}))
-				projectId = varargin{1};
-			else
-				projectId = '';
+				projectLabel = varargin{1};
+         else
+				projectLabel = '';
 			end
-			jIacList = this.xds.searchIac(projectId, patient);
+			%jIacList = this.xds.searchIac(projectId, patient);
+         xns = icr.etherj.matlab.XnatSearcherForMatlab(this.xds);         
+         jIacList = xns.searchIacProjLabelSubjLabel(projectLabel, patient);
+         
 			for i=0:jIacList.size()-1
 				jIac = jIacList.get(i);
 				iacList.add(ether.aim.ImageAnnotationCollection(jIac));

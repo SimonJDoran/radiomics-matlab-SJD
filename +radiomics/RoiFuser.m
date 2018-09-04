@@ -119,12 +119,12 @@ classdef RoiFuser < handle
 		%-------------------------------------------------------------------------
 		function newIac = createIac(this, miMap, series, iaIdx)
 			newIac = [];
-			nowDt = char(etherj.aim.AimUtils.toDateTime(java.util.Date()));
+			nowDt = char(icr.etherj.aim.AimUtils.toDateTime(java.util.Date()));
 			miArr = this.getSortedMarkupItems(miMap);
 			iac = miArr(1).iaItem.iac;
 			jIac = this.createJIac(iac, nowDt);
 			ia = miArr(1).iaItem.ia;
-			jIa = etherj.aim.ImageAnnotation();
+			jIa = icr.etherj.aim.ImageAnnotation();
 			jIa.setUid(dicomuid());
 			jIa.setComment(sprintf('%s / %i / %s / Fused ROI %i', ...
 				series.modality, series.number, series.description, iaIdx));
@@ -134,7 +134,7 @@ classdef RoiFuser < handle
 			imageRefs = miArr(1).iaItem.ia.getAllReferences();
 			% Assume just one image reference
 			study = imageRefs(1).imageStudy;
-			jImageRef = etherj.aim.DicomImageReference();
+			jImageRef = icr.etherj.aim.DicomImageReference();
 			jImageRef.setUid(dicomuid());
 			jStudy = this.createJImageStudy(study);
 			jImageRef.setStudy(jStudy);
@@ -164,7 +164,7 @@ classdef RoiFuser < handle
 
 		%-------------------------------------------------------------------------
 		function jEquipment = createJEquipment(~, equipment)
-			jEquipment = etherj.aim.Equipment(equipment.manufacturerName, ...
+			jEquipment = icr.etherj.aim.Equipment(equipment.manufacturerName, ...
 				equipment.manufacturerModelName);
 			jEquipment.setDeviceSerialNumber(equipment.deviceSerialNumber);
 			jEquipment.setSoftwareVersion(equipment.softwareVersion);
@@ -172,7 +172,7 @@ classdef RoiFuser < handle
 
 		%-------------------------------------------------------------------------
 		function jIac = createJIac(this, iac, nowDt)
-			jIac = etherj.aim.ImageAnnotationCollection();
+			jIac = icr.etherj.aim.ImageAnnotationCollection();
 			jIac.setUid(dicomuid());
 			jIac.setAimVersion(iac.aimVersion);
 			jIac.setDateTime(nowDt);
@@ -183,17 +183,17 @@ classdef RoiFuser < handle
 
 		%-------------------------------------------------------------------------
 		function jImage = createJImage(~, image)
-			jImage = etherj.aim.Image();
+			jImage = icr.etherj.aim.Image();
 			jImage.setSopInstanceUid(image.sopInstanceUid);
 			jImage.setSopClassUid(image.sopClassUid);
 		end
 
 		%-------------------------------------------------------------------------
 		function jImageSeries = createJImageSeries(~, series)
-			jImageSeries = etherj.aim.ImageSeries();
+			jImageSeries = icr.etherj.aim.ImageSeries();
 			jImageSeries.setInstanceUid(series.instanceUid);
 			modality = series.modality;
-			jModality = etherj.aim.Code();
+			jModality = icr.etherj.aim.Code();
 			jModality.setCode(modality.code);
 			jModality.setCodeSystem(modality.codeSystem);
 			jModality.setCodeSystemName(modality.codeSystemName);
@@ -203,7 +203,7 @@ classdef RoiFuser < handle
 
 		%-------------------------------------------------------------------------
 		function jImageStudy = createJImageStudy(~, study)
-			jImageStudy = etherj.aim.ImageStudy();
+			jImageStudy = icr.etherj.aim.ImageStudy();
 			jImageStudy.setInstanceUid(study.instanceUid);
 			jImageStudy.setStartDate(study.startDate);
 			jImageStudy.setStartTime(study.startTime);
@@ -220,14 +220,14 @@ classdef RoiFuser < handle
 
 		%-------------------------------------------------------------------------
 		function jPerson = createJPerson(~, person)
-			jPerson = etherj.aim.Person(person.name, person.birthDate, person.id);
+			jPerson = icr.etherj.aim.Person(person.name, person.birthDate, person.id);
 			jPerson.setEthnicGroup(person.ethnicGroup);
 			jPerson.setSex(person.sex);
 		end
 
 		%-------------------------------------------------------------------------
 		function jMarkup = createJTwoDimensionPolyline(~, markup)
-			jMarkup = etherj.aim.TwoDimensionPolyline();
+			jMarkup = icr.etherj.aim.TwoDimensionPolyline();
 			jMarkup.setUid(dicomuid());
 			jMarkup.setImageReferenceUid(markup.imageReferenceUid);
 			jMarkup.setReferencedFrameNumber(markup.referencedFrameNumber);
@@ -239,7 +239,7 @@ classdef RoiFuser < handle
 			coords = markup.getTwoDCoordinates();
 			for i=1:numel(coords)
 				coord = coords(i);
-				jCoord = etherj.aim.TwoDimensionCoordinate(coord.index, coord.x, ...
+				jCoord = icr.etherj.aim.TwoDimensionCoordinate(coord.index, coord.x, ...
 					coord.y);
 				jMarkup.addCoordinate(jCoord);
 			end
@@ -247,7 +247,7 @@ classdef RoiFuser < handle
 
 		%-------------------------------------------------------------------------
 		function jUser = createJUser(~, user)
-			jUser = etherj.aim.User(user.name, user.loginName);
+			jUser = icr.etherj.aim.User(user.name, user.loginName);
 			jUser.setNumberWithinRoleOfClinicalTrial(...
 				user.numberWithinRoleOfClinicalTrial);
 			jUser.setRoleInTrial(user.roleInTrial);

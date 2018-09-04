@@ -88,7 +88,7 @@ classdef MainUi < ether.app.AbstractGuiApplication
 				end
 			end
 			if isempty(this.options.projectId)
-				this.options.projectId = 'BRC_RADPRIM';
+				this.options.projectId = 'Cervix_Radiomi';
 			end
 			this.logInfo(@() sprintf('Project ID: %s', this.options.projectId));
 		end
@@ -430,6 +430,7 @@ classdef MainUi < ether.app.AbstractGuiApplication
 				'Searching for patients like "%s" in project %s...', ...
 				patStr, this.options.projectId));
 			iacList = this.dataSource.searchIac(patStr, this.options.projectId);
+         
 			if iacList.size() == 0
 				message = sprintf('No results for: %s', patStr);
 				this.logInfo(message);
@@ -572,7 +573,7 @@ classdef MainUi < ether.app.AbstractGuiApplication
 			fileName = [iacDir,iaName,'_',iacUid,'.xml'];
 			this.logInfo(['Writing IAC to: ',fileName]);
 			jIac = iac.getJavaIac();
-			jWriter = etherj.aim.DefaultXmlWriter();
+			jWriter = icr.etherj.aim.DefaultXmlWriter();
 			try
 				jWriter.write(jIac, fileName);
 			catch ex
@@ -619,7 +620,7 @@ classdef MainUi < ether.app.AbstractGuiApplication
 			dateTimes = dateTimes(idx);
 			items = items(idx);
 			% Convert dateTimes to uint64
-			dates = cellfun(@(dt) etherj.aim.AimUtils.parseDateTime(dt), ...
+			dates = cellfun(@(dt) icr.etherj.aim.AimUtils.parseDateTime(dt), ...
 				dateTimes, 'UniformOutput', false);
 			dateTimes = cellfun(@(dt) dt.getTime(), dates);
 			% Sort each name clump by dateTime

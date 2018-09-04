@@ -17,7 +17,7 @@ classdef ImageVolume < handle
 	methods
 		%-------------------------------------------------------------------------
 		function this = ImageVolume(arg)
-			if (isa(arg, 'etherj.dicom.Series'))
+			if (isa(arg, 'icr.etherj.dicom.Series'))
 				toolkit = ether.dicom.Toolkit.getToolkit();
 				series = toolkit.createSeries(arg);
 			else

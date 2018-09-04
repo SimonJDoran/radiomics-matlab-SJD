@@ -111,11 +111,11 @@ classdef TextureAnalyser3D < radiomics.TextureAnalyser
 				% Shift to 1-based coords
 				points = points+1;
 				mask = poly2mask(points(:,1), points(:,2), nY, nX);
-				if ~any(mask)
-					throw(MException('Radiomics:MainUi', ...
-						'Contour encloses zero pixels'));
-				end
 				ivMask(:,:,ivIdx) = mask;
+         end
+         if ~any(ivMask(:))
+				throw(MException('Radiomics:MainUi', ...
+               'Mask volume contains zero pixels'));
 			end
 		end
 
