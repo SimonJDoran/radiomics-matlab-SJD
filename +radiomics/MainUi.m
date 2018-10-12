@@ -280,9 +280,9 @@ classdef MainUi < ether.app.AbstractGuiApplication
 			this.table = uitable(this.frame);
 			this.table.CellSelectionCallback = @this.onCellSelection;
 			this.table.ColumnName = ...
-				{'Person Name','Person ID','Date/Time','Scan','Lesion','ROI'};
+				{'Person Name','Person ID','Date/Time','Scan','Lesion','ROI', 'Type'};
 			this.table.ColumnWidth = ...
-				{200,150,150,'auto','auto','auto'};
+				{200,150,150,'auto','auto','auto','auto'};
 			this.table.RowStriping = 'on';
 
 			% Position everything
@@ -392,8 +392,8 @@ classdef MainUi < ether.app.AbstractGuiApplication
 			this.frame.Pointer = 'watch';
 			rowIdx = unique(this.tableSelection(:,1));
 			nRows = length(rowIdx);
-			iaItems = this.table.UserData;
-			if isempty(iaItems)
+			radItems = this.table.UserData;
+			if isempty(radItems)
 				this.frame.Pointer = 'arrow';
 				return;
 			end
@@ -406,7 +406,7 @@ classdef MainUi < ether.app.AbstractGuiApplication
 			end
 			this.logInfo(@() sprintf('Processing %d ROIs...', nRows));
 			analyser = radiomics.TextureAnalyser3D();
-			resultList = analyser.analyse(iaItems(rowIdx), this.dataSource, ...
+			resultList = analyser.analyse(radItems(rowIdx), this.dataSource, ...
 				this.options.projectId);
 			this.saveResults(resultList);
 			this.frame.Pointer = 'arrow';
@@ -429,39 +429,63 @@ classdef MainUi < ether.app.AbstractGuiApplication
 			this.logInfo(@() sprintf(...
 				'Searching for patients like "%s" in project %s...', ...
 				patStr, this.options.projectId));
-			iacList = this.dataSource.searchIac(patStr, this.options.projectId);
-         
-			if iacList.size() == 0
-				message = sprintf('No results for: %s', patStr);
-				this.logInfo(message);
-				msgbox(message, 'Search', 'warn', 'modal');
-				this.frame.Pointer = 'arrow';
-				return;
-			end
+			
 
-			iaItemList = ether.collect.CellArrayList('radiomics.IaItem');
+			radItemList = ether.collect.CellArrayList('radiomics.RadItem');
+         
+         % First add the ImageAnnotationCollections
+         iacList = this.dataSource.searchIac(patStr, this.options.projectId);
+
 			for i=1:iacList.size()
 				iac = iacList.get(i);
 				iaArr = iac.getAllAnnotations();
 				for j=1:length(iaArr)
 					iaItem = radiomics.IaItem(iaArr(j), iac);
-					iaItemList.add(iaItem);
+					radItemList.add(iaItem);
+				end
+         end
+          % Now do the same thing for RT-STRUCTs.
+         rtsList = this.dataSource.searchRts(patStr, this.options.projectId);
+         
+			for i=1:rtsList.size()
+				rts = rtsList.get(i);
+            roiList = rts.getRoiList();
+				for j=1:length(roiList)
+					rtRoiItem = radiomics.RtRoiItem(roiList.get(j), rts);
+					radItemList.add(rtRoiItem);
 				end
 			end
 
 			% ToDo: Filter the iaItemList for lesion and scan matches
-			nCols = 6;
-			data = cell(iaItemList.size(), nCols);
-			items = this.sortIaItemsArray(iaItemList.toArray());
-			for i=1:iaItemList.size()
-				item = items(i);
+			nCols = 7;
+			data = cell(radItemList.size(), nCols);
+			items = this.sortRadItems(radItemList.toCellArray());
+			for i=1:radItemList.size()
+				cellItem = items(i);
+            item = cellItem{1};
 				data{i,1} = item.personName;
 				data{i,2} = item.personId;
-				data{i,3} = item.ia.dateTime;
+				data{i,3} = item.dateTime;
 				data{i,4} = item.scan;
 				data{i,5} = item.lesionNumber;
 				data{i,6} = item.roiNumber;
-			end
+            data{i,7} = '';
+            if isa(item, 'radiomics.IaItem')
+               data{i,7} = 'IAC';
+            end
+            if isa(item, 'radiomics.RtRoiItem')
+               data{i,7} = 'RT-STRUCT';
+            end
+         end         
+         
+         if (iacList.size() + rtsList.size()) == 0
+				message = sprintf('No results for: %s', patStr);
+				this.logInfo(message);
+				msgbox(message, 'Search', 'warn', 'modal');
+				this.frame.Pointer = 'arrow';
+				return;
+         end
+         
 			this.table.UserData = items;
 			this.table.Data = data;
 			this.logInfo(@() sprintf('Search complete'));
@@ -506,8 +530,9 @@ classdef MainUi < ether.app.AbstractGuiApplication
 		end
 
 		%-------------------------------------------------------------------------
-		function outputResults(this, results, iaItem)
+		function iaOutputResults(this, results, IaItem)
 			import radiomics.*;
+        
 			iac = iaItem.iac;
 			patientName = iac.person.name;
 			if isempty(patientName)
@@ -560,6 +585,63 @@ classdef MainUi < ether.app.AbstractGuiApplication
 			fclose(fileId);
 		end
 
+
+		%-------------------------------------------------------------------------
+		function rtRoiOutputResults(this, results, rtRoiItem)
+			import radiomics.*;
+        
+			rts = rtRoiItem.rts;
+			patientName = rts.getPatientName();
+			if isempty(patientName)
+				patientName = rts.getPatientId();
+			end
+			if isempty(patientName)
+				patientName = rts.getSopInstanceUid();
+			end
+			patDir = [this.options.targetPath,patientName,filesep()];
+			if (exist(patDir, 'dir') == 0)
+				mkdir(patDir);
+			end
+			lesionStr = '';
+			if (~isempty(rtRoiItem.scan))
+				if (rtRoiItem.lesionNumber > 0) && (rtRoiItem.roiNumber > 0)
+					lesionStr = sprintf('%s-%03i-%s-%03i', patientName, ...
+						rtRoiItem.lesionNumber, rtRoiItem.scan, rtRoiItem.roiNumber);
+				else
+					lesionStr = strjoin(strsplit(erase(rtRoiItem.scan, '.'), ' '), '_');
+				end
+			end
+		   rtRoi = rtRoiItem.rtRoi;
+			dt = strjoin(strsplit(rtRoiItem.dateTime, ':'), '-');
+			fileName = [patDir,'AertsResults'];
+			desc = strjoin(strsplit(rts.getDescription(), ' '), '_');
+			if ~isempty(desc)
+				fileName = [fileName,'_',desc];
+			end
+			if ~isempty(lesionStr)
+				fileName = [fileName,'_',lesionStr];
+			end
+			fileName = [fileName,'_',dt,'_',rts.getSopInstanceUid(),'_',rtRoi.number,'.txt'];
+			this.logInfo(['Writing results to: ',fileName]);
+			fileId = fopen(fileName, 'w');
+			fprintf(fileId, 'PatientName: %s\n', patientName);
+			fprintf(fileId, 'RT-STRUCT Description: %s\n', rts.getDescription());
+			fprintf(fileId, 'ROI name: %s\n', rtRoi.name);
+			fprintf(fileId, 'ROI UID: %s\n', rts.getSopInstanceUid(),'_',rtRoi.number);
+			metrics = Aerts.getMetrics();
+			prefix = {'', 'LLL.', 'LLH.', 'LHL.', 'LHH.', 'HLL.', 'HLH.', 'HHL.', 'HHH.'};
+			for j=1:numel(prefix)
+				for i=1:metrics.size()
+					name = [prefix{j},metrics.get(i)];
+					if ~results.isKey(name)
+						continue;
+					end
+					fprintf(fileId, '%s: %f\n', name, results(name));
+				end
+			end
+			fclose(fileId);
+		end
+
 		%-------------------------------------------------------------------------
 		function saveFusedIac(this, iac)
 			import radiomics.*;
@@ -592,7 +674,11 @@ classdef MainUi < ether.app.AbstractGuiApplication
 		function saveResults(this, resultList)
 			for i=1:resultList.size()
 				result = resultList.get(i);
-				this.outputResults(result.results, result.iaItem)
+            if isa(result.radItem, 'radiomics.IaItem')
+				   this.iaOutputResults(result.results, result.radItem)
+            elseif isa(result.radItem, 'radiomics.RtRoiItem')
+				   this.rtRoiOutputResults(result.results, result.radItem)
+            end            
 			end
 		end
 
@@ -610,11 +696,11 @@ classdef MainUi < ether.app.AbstractGuiApplication
 		end
 
 		%-------------------------------------------------------------------------
-		function items = sortIaItemsArray(~, items)
+		function items = sortRadItems(this, items)
 			% Sort into name order
-			names = arrayfun(@(item) item.personName, items, 'UniformOutput', ...
-				false);
-			dateTimes = arrayfun(@(item) item.ia.dateTime, items, ...
+			names = cellfun(@(item) item.personName, items, ...
+            'UniformOutput', false);
+			dateTimes = cellfun(@(item) string(item.dateTime), items, ...
 				'UniformOutput', false);
 			[names,idx] = sort(names);
 			dateTimes = dateTimes(idx);
@@ -633,7 +719,7 @@ classdef MainUi < ether.app.AbstractGuiApplication
 				currItems = items(startIdx:startIdx+nCurrItems-1);
 				items(startIdx:startIdx+nCurrItems-1) = currItems(dtIdx);
 				startIdx = startIdx+nCurrItems;
-			end
+         end
 		end
 
 	end

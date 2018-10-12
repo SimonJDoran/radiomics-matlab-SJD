@@ -4,15 +4,15 @@ classdef TextureResult < handle
 	
 	properties(SetAccess=private)
 		results;
-		iaItem;
+		radItem;
 	end
 	
 	%----------------------------------------------------------------------------
 	methods
 		%-------------------------------------------------------------------------
-		function this = TextureResult(results, iaItem)
+		function this = TextureResult(results, radItem)
 			this.results = results;
-			this.iaItem = iaItem;
+			this.radItem = radItem;
 		end
 	end
 	

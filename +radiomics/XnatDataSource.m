@@ -60,6 +60,26 @@ classdef XnatDataSource < radiomics.DataSource
 		end
 
 		%-------------------------------------------------------------------------
+		function rtsList = searchRts(this, patient, varargin)
+			rtsList = ether.collect.CellArrayList(...
+				'ether.dicom.RtStruct');
+
+			if ((nargin == 3) && ischar(varargin{1}))
+				projectLabel = varargin{1};
+         else
+				projectLabel = '';
+			end
+			
+         xns = icr.etherj.matlab.XnatSearcherForMatlab(this.xds);         
+         jRtsList = xns.searchRtsProjLabelSubjLabel(projectLabel, patient);
+         
+			for i=0:jRtsList.size()-1
+				jRts = jRtsList.get(i);
+				rtsList.add(ether.dicom.RtStruct(jRts));
+			end
+		end
+
+		%-------------------------------------------------------------------------
 		function series = getImageSeries(this, projectId, uid, type, varargin)
 			import radiomics.*;
 			series = [];

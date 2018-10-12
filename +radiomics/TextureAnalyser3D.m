@@ -17,16 +17,24 @@ classdef TextureAnalyser3D < radiomics.TextureAnalyser
 	%----------------------------------------------------------------------------
 	methods
 		%-------------------------------------------------------------------------
-		function resultList = analyse(this, iaItems, dataSource, projectId)
+		function resultList = analyse(this, radItems, dataSource, projectId)
 			resultList = ether.collect.CellArrayList('radiomics.TextureResult');
 
 			this.logger.info(@() sprintf('Fetching referenced series'));
-			nIaItems = numel(iaItems);
-			this.buildRefSeriesMap(iaItems, dataSource, projectId);
-			for i=1:nIaItems
+			nRadItems = numel(radItems);
+			this.buildRefSeriesMap(radItems, dataSource, projectId);
+			for i=1:nRadItems
 				this.logger.info(@() sprintf('Processing annotation (%d of %d)', ...
-					i, nIaItems));
-				this.processItem(iaItems(i), resultList);
+					i, nRadItems));
+            cellRadItem = radItems(i);
+				radItem = cellRadItem{1};
+            
+            if isa(radItem, 'radiomics.IaItem')
+               this.processIaItem(radItem, resultList);
+            end
+            if isa(radItem, 'radiomics.RtRoiItem')
+               this.processRtRoiItem(radItem, resultList);
+            end
 			end
 		end
 	
@@ -35,7 +43,7 @@ classdef TextureAnalyser3D < radiomics.TextureAnalyser
 	%----------------------------------------------------------------------------
 	methods(Access=private)
 		%-------------------------------------------------------------------------
-		function buildRefSeriesMap(this, iaItems, dataSource, projectId)
+		function buildRefSeriesMap(this, radItems, dataSource, projectId)
 			import radiomics.*;
 			this.refSeriesMap = containers.Map('KeyType', 'char', ...
 				'ValueType', 'any');
@@ -44,33 +52,41 @@ classdef TextureAnalyser3D < radiomics.TextureAnalyser
 			this.instSeriesMap = containers.Map('KeyType', 'char', ...
 				'ValueType', 'any');
 			this.logger.info(@() sprintf('Fetching referenced series'));
-			nItems = numel(iaItems);
+			nItems = numel(radItems);
 			for i=1:nItems
-				iaItem = iaItems(i);
-				refSeriesUidList = iaItem.ia.getReferencedSeriesUidList();
-				for j=1:refSeriesUidList.size()
-					refSeriesUid = refSeriesUidList.get(j);
-					if this.refSeriesMap.isKey(refSeriesUid)
-						continue;
-					end
-					series = dataSource.getImageSeries(projectId, ...
-						refSeriesUid, DataSource.Series);
-					if ~isempty(series)
-						this.insertSeries(series);
-						this.logger.info(@() sprintf('Series: %d - %s (%s)', series.number, ...
-							series.description, series.instanceUid));
-					else
-						this.logger.info(@() sprintf('Series not found: UID - %s', ...
-							refSeriesUid));
-					end
-				end
+            cellRadItem = radItems(i);
+				radItem = cellRadItem{1};
+            
+            if isa(radItem, 'radiomics.IaItem')
+               refSeriesUidList = radItem.ia.getReferencedSeriesUidList();
+            elseif isa(radItem, 'radiomics.RtRoiItem')
+               refSeriesUidList = radItem.rtRoi.getReferencedSeriesUidList();
+            else return
+            end
+            for j=1:refSeriesUidList.size()
+               refSeriesUid = refSeriesUidList.get(j);
+               if this.refSeriesMap.isKey(refSeriesUid)
+                  continue;
+               end
+               series = dataSource.getImageSeries(projectId, ...
+                  refSeriesUid, DataSource.Series);
+               if ~isempty(series)
+                  this.insertSeries(series);
+                  this.logger.info(@() sprintf('Series: %d - %s (%s)', series.number, ...
+                     series.description, series.instanceUid));
+               else
+                  this.logger.info(@() sprintf('Series not found: UID - %s', ...
+                     refSeriesUid));
+               end
+            end
+               
 			end
 			this.logger.info(@() sprintf('%d referenced series loaded', ...
 				this.refSeriesMap.length()));
 		end
 
 		%-------------------------------------------------------------------------
-		function iv = createImageVolume(this, ia)
+		function iv = iaCreateImageVolume(this, ia)
 			iv = [];
 			iaImageRefs = ia.getAllReferences();
 			if ~this.loadImageReferences(iaImageRefs)
@@ -94,7 +110,18 @@ classdef TextureAnalyser3D < radiomics.TextureAnalyser
 		end
 
 		%-------------------------------------------------------------------------
-		function ivMask = createVolumeMask(this, iv, ia)
+		function iv = rtRoiCreateImageVolume(this, rtRoi)
+			iv = [];
+         seriesUids = rtRoi.getReferencedSeriesUidList();
+         if (seriesUids.size() > 1)
+				% volume spans series
+				throw(MException('radiomics:TextureAnalyzer3D', 'Multiseries volume detected'));
+         end
+         iv = this.seriesVolumeMap(seriesUids.get(1));
+      end
+      
+      %-------------------------------------------------------------------------
+		function ivMask = iaCreateVolumeMask(this, iv, ia)
 			if isempty(iv)
 				throw(MException('Radiomics:MainUi', ...
 					'ImageVolume not found'));
@@ -117,6 +144,42 @@ classdef TextureAnalyser3D < radiomics.TextureAnalyser
 				throw(MException('Radiomics:MainUi', ...
                'Mask volume contains zero pixels'));
 			end
+		end
+
+      
+      %-------------------------------------------------------------------------
+		function ivMask = rtRoiCreateVolumeMask(this, iv, rtRoi)
+			if isempty(iv)
+				throw(MException('Radiomics:MainUi', ...
+					'ImageVolume not found'));
+			end
+			[nY,nX,nZ] = size(iv.data);
+			ivMask = zeros(nY, nX, nZ, 'logical');
+			
+         cl = rtRoi.getContourList();
+         for i=1:cl.size()
+            contour = cl.get(i);
+            refList = contour.getImageReferenceList();
+            if (numel(refList) ~= 1)
+               throw(MException('Radiomics:MainUi', ...
+					'Contour spans more than one image slice.'));
+            end
+            points = contour.getContourPointsList();
+            % Shift to 1-based coords
+				points = points+1;
+				mask = poly2mask(points(:,1), points(:,2), nY, nX);
+            
+            % Find the position in the array where this goes.
+            sopInstUid = refList.get(1).sopInstanceUid;
+            ivIdx = find(cellfun(@(c) strcmp(c, sopInstUid), ...
+					iv.sopInstUids));
+            ivMask(:,:,ivIdx) = mask;
+         end
+         if ~any(ivMask(:))
+				throw(MException('Radiomics:MainUi', ...
+               'Mask volume contains zero pixels'));           
+         end
+            
 		end
 
 		%-------------------------------------------------------------------------
@@ -174,13 +237,13 @@ classdef TextureAnalyser3D < radiomics.TextureAnalyser
 		end
 
 		%-------------------------------------------------------------------------
-		function processItem(this, iaItem, resultList)
+		function processIaItem(this, iaItem, resultList)
 			ia = iaItem.ia;
 			this.logger.info(@() sprintf('Processing Patient %s, ImageAnnotation: %s', ...
 				iaItem.iac.person.name, ia.name));
-			iv = this.createImageVolume(ia);
+			iv = this.iaCreateImageVolume(ia);
 			try
-				ivMask = this.createVolumeMask(iv, ia);
+				ivMask = this.iaCreateVolumeMask(iv, ia);
 				% Native pixels
 				results = containers.Map('KeyType', 'char', 'ValueType', 'any');
 				radiomics.AertsStatistics.compute(iv.data, ivMask, results);
@@ -201,6 +264,33 @@ classdef TextureAnalyser3D < radiomics.TextureAnalyser
 		end
 
 		%-------------------------------------------------------------------------
+		function processRtRoiItem(this, rtRoiItem, resultList)
+			rtRoi = rtRoiItem.rtRoi;
+			this.logger.info(@() sprintf('Processing Patient %s, RT-STRUCT: %s', ...
+				rtRoi.getPatientName(), rtRoi.name));
+			iv = this.rtRoiCreateImageVolume(rtRoi);
+			try
+				ivMask = this.rtRoiCreateVolumeMask(iv, rtRoi);
+				% Native pixels
+				results = containers.Map('KeyType', 'char', 'ValueType', 'any');
+				radiomics.AertsStatistics.compute(iv.data, ivMask, results);
+				radiomics.AertsShape.compute(ivMask, iv.pixelDimensions, results);
+				radiomics.AertsTexture.compute(iv.data, ivMask, results);
+
+				% Wavelet decompositions
+				this.processWavelet(iv.data, ivMask, results);
+
+				resultList.add(radiomics.TextureResult(results, rtRoiItem));
+			catch ex
+				this.logger.warn(...
+					@() sprintf('ERROR: Processing ROI failed: %s - %s', ...
+						rtRoi.name, ex.message));
+				this.logger.warn(...
+					@() sprintf('ERROR in RT-STRUCT UID: %s', rtRoiIte.dateTime));
+			end
+      end
+      
+      %-------------------------------------------------------------------------
 		function results = processWavelet(this, data, mask, results)
 			transform = radiomics.Wavelet.dwt3u(data, 'coif1', 'mode', 'zpd');
 			dirString = {'L','H'};
