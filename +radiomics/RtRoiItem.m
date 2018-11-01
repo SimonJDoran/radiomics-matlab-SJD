@@ -2,7 +2,11 @@ classdef RtRoiItem < radiomics.RadItem
 	%IAITEM Summary of this class goes here
 	%   Detailed explanation goes here
 	
-	properties(SetAccess=private)
+	properties
+      seriesDescription;
+   end
+   
+   properties(SetAccess=private)
 		rtRoi = [];
       rts = [];
    end

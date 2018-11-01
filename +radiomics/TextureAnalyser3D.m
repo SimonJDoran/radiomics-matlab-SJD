@@ -74,6 +74,7 @@ classdef TextureAnalyser3D < radiomics.TextureAnalyser
                   this.insertSeries(series);
                   this.logger.info(@() sprintf('Series: %d - %s (%s)', series.number, ...
                      series.description, series.instanceUid));
+                  radItem.seriesDescription = series.description
                else
                   this.logger.info(@() sprintf('Series not found: UID - %s', ...
                      refSeriesUid));

@@ -628,6 +628,7 @@ classdef MainUi < ether.app.AbstractGuiApplication
 			fprintf(fileId, 'RT-STRUCT Description: %s\n', rts.getDescription());
 			fprintf(fileId, 'ROI name: %s\n', rtRoi.name);
 			fprintf(fileId, 'ROI UID: %s\n', rts.getSopInstanceUid(),'_',rtRoi.number);
+         fprintf(fileId, 'Series description: %s\n', rtRoiItem.seriesDescription);
 			metrics = Aerts.getMetrics();
 			prefix = {'', 'LLL.', 'LLH.', 'LHL.', 'LHH.', 'HLL.', 'HLH.', 'HHL.', 'HHH.'};
 			for j=1:numel(prefix)
