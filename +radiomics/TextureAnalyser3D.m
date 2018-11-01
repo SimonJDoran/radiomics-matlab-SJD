@@ -155,6 +155,8 @@ classdef TextureAnalyser3D < radiomics.TextureAnalyser
 			end
 			[nY,nX,nZ] = size(iv.data);
 			ivMask = zeros(nY, nX, nZ, 'logical');
+         
+         series = this.refSeriesMap(iv.seriesUid);
 			
          cl = rtRoi.getContourList();
          for i=1:cl.size()
@@ -165,9 +167,31 @@ classdef TextureAnalyser3D < radiomics.TextureAnalyser
 					'Contour spans more than one image slice.'));
             end
             points = contour.getContourPointsList();
-            % Shift to 1-based coords
-				points = points+1;
-				mask = poly2mask(points(:,1), points(:,2), nY, nX);
+            
+            % Find the image slice with the SOPInstanceUid used by the contour.
+            images = series.Images;
+            found = false;
+            img = images(1);
+            for j=1:length(images)
+               img = images(j);
+               if (strcmp(refList.get(1).sopInstanceUid, img.sopInstanceUid))
+                  found = true;
+                  break
+               end              
+            end
+            if ~found
+                  throw(MException('Radiomics:MainUi', ...
+                  'SOPInstanceUid not found - this should not happen!'));           
+            end
+            
+            % Use the image orientation and image postion for this slice
+            % to move from an absolute 3-D coordinate system to the x and
+            % y indices of the pixels within the image.
+            [idx, idy] = this.convert3dPointsToWithinSliceIndices(points, ...
+               img.imageOrientation, img.imagePosition, img.pixelSpacing); 
+               
+            % Shift to 1-based coords and create mask.
+				mask = poly2mask(idx+1, idy+1, nY, nX);
             
             % Find the position in the array where this goes.
             sopInstUid = refList.get(1).sopInstanceUid;
@@ -286,7 +310,7 @@ classdef TextureAnalyser3D < radiomics.TextureAnalyser
 					@() sprintf('ERROR: Processing ROI failed: %s - %s', ...
 						rtRoi.name, ex.message));
 				this.logger.warn(...
-					@() sprintf('ERROR in RT-STRUCT UID: %s', rtRoiIte.dateTime));
+					@() sprintf('ERROR in RT-STRUCT UID: %s', rtRoiItem.dateTime));
 			end
       end
       
@@ -309,9 +333,111 @@ classdef TextureAnalyser3D < radiomics.TextureAnalyser
 					end
 				end
 			end
-		end
+      end
+      
+      %-------------------------------------------------------------------------
+      % r - n x 3 matrix of 3-D coordinates
+      % c - 6 x 1 matrix of direction cosines
+      % p - 3 x 1 matrix, 3-D coordinates of top left pixel in image
+      % d - 2 x 1 matrix, pixel dimensions
+      function [idx, idy] = convert3dPointsToWithinSliceIndices(this, r, c, p, d)
+         
+         % TODO : rewrite this function without the loop, using matrix
+         % operations. This is a "slow and dirty" initial hack.
+         idx = [];
+         idy = [];
+         for j=1:size(r, 1)
+         
+            % There are a number of different ways of calculating the row and 
+            % column in the image (9 simultaneous equations to choose from),
+            % all of which should give the same result within
+            % the relevant floating point tolerance. However, not all methods are
+            % applicable or reliable if a given direction cosine is zero or close
+            % to zero.
+            x = r(j,1) - p(1);
+            y = r(j,2) - p(2);
+            z = r(j,3) - p(3);
 
-	end
+            % Replace tests for equality to zero with comparisons to tolerance value,
+            % so that we don't get inaccuracies creeping in by using very small numbers
+            % in calculations.
+            tol = 0.001;
+            dn  = 0.0;
+
+            % Arrays to collect results.
+            X = [];
+            Y = [];
+
+            if (abs(c(4)) > tol)
+
+               dn = c(2)*c(4) - c(1)*c(5);
+               if (dn > tol)
+                  X = [X, (c(4)*y - c(5)*x) / dn];
+                  Y = [Y, (c(2)*x - c(1)*y) / dn];
+               end
+
+               dn = c(3)*c(4) - c(1)*c(6);
+               if (dn > tol)
+                  X = [X, (c(4)*z - c(6)*x) / dn];
+                  Y = [Y, (c(3)*x - c(1)*z) / dn];
+               end
+
+            end
+
+            if (abs(c(5)) > tol)
+
+               dn = c(3)*c(5) - c(2)*c(6);
+               if (dn > tol)
+                  X = [X, (c(5)*z - c(6)*y) / dn];
+                  Y = [Y, (c(3)*y - c(2)*z) / dn];
+               end
+
+               dn = c(1)*c(5) - c(2)*c(4);
+               if (dn > tol)
+                  X = [X, (c(5)*x - c(4)*y) / dn];
+                  Y = [Y, (c(1)*y - c(2)*x) / dn];
+               end
+
+            end
+
+
+            if (abs(c(6)) > tol)
+
+               dn = c(1)*c(6) - c(3)*c(4);
+               if (dn > tol)
+                  X = [X, (c(6)*x - c(4)*z) / dn];
+                  Y = [Y, (c(1)*z - c(3)*x) / dn];
+               end
+
+               dn = c(2)*c(6) - c(3)*c(5);
+               if (dn > tol)
+                  X = [X, (c(6)*y - c(5)*z) / dn];
+                  Y = [Y, (c(2)*z - c(3)*y) / dn];
+               end
+
+            end
+
+            % Sanity check
+            if length(X) == 0
+               throw(MException('Radiomics:MainUi', ...
+                  'Coordinate conversion failed sanity check'));
+            end
+
+            for k=1:length(X)
+               if (abs(X(k) - X(1)) > tol) || (abs(Y(k) - Y(1)) > tol)
+                  throw(MException('Radiomics:MainUi', ...
+                  'Coordinate conversion failed sanity check'));
+               end
+            end
+
+         idx = [idx, round(X(1) / d(2))];
+         idy = [idy, round(Y(1) / d(1))];
+
+         end
+         
+      end
+
+   end
 
 end
 
